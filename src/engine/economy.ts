@@ -1,4 +1,4 @@
-import type {AgentId,Decisions,GameState,Indicators,Score} from './types';
+import type {AgentId,Decisions,GameState,GovernmentId,Indicators,Score} from './types';
 import {clamp,round} from './rng';
 export type Flows=Omit<Indicators,'player_score'> & { tsmc_delivered:number; other_market:number; ga_consumed:number; ge_consumed:number; ga_imports:number; ge_imports:number };
 export function licenseFactor(s:GameState,level:number,type:'chip'|'tool'='tool'):number {
@@ -42,25 +42,41 @@ export function calculateFlows(s:GameState,decisions:Decisions={}):Flows {
 }
 export function computeScore(s:GameState,role:AgentId,flows=calculateFlows(s)):Score {
   const p=s.config.parameters,us=role.startsWith('US'),cn=role.startsWith('CN');
+  const initial=s.config.initial.finance;
+  const economyIndex=(profit:number,reference:number)=>p.score_economy_base+(100-p.score_economy_base)*profit/Math.max(1,reference*p.score_economy_target_multiple);
+  const budgetIndex=(government:GovernmentId)=>100*s.finance.government_budgets[government]/Math.max(1,initial.government_budgets[government]+s.config.maxTurns*p.fiscal_replenishment);
   let technology:number,economy:number,diplomacy:number,fiscal:number;
   if(!role.endsWith('_GOV')){
     const firm=role as keyof typeof s.finance.firm_cash;
     technology=firm==='US_AI'?s.technology.us_ai_frontier:firm==='CN_DESIGN'?s.technology.cn_design:firm==='CN_FAB'?(s.technology.cn_process+s.technology.cn_yield)/2:s.capacity.tsmc_total;
-    economy=p.score_initial_economy+s.finance.firm_profit[firm]*p.score_profit_scale;
-    diplomacy=100;fiscal=s.finance.firm_cash[firm]*p.score_cash_scale;
+    economy=economyIndex(s.finance.firm_profit[firm],initial.firm_profit[firm]);
+    diplomacy=100;fiscal=100*s.finance.firm_cash[firm]/Math.max(1,initial.firm_cash[firm]*p.score_firm_cash_target_multiple);
   }
-  else if(cn){technology=100*flows.cn_usable_ai/Math.max(1,p.demand_cn);economy=p.score_initial_economy+(s.finance.firm_profit.CN_DESIGN+s.finance.firm_profit.CN_FAB)*p.score_profit_scale;
-    diplomacy=100-(s.policy.cn_ga+s.policy.cn_ge)*p.score_material_diplomacy_penalty;fiscal=s.finance.government_budgets.CN_GOV*p.score_fiscal_scale;}
-  else if(us){technology=(s.technology.us_ai_frontier+100-flows.cn_legal_ai_import)/2;economy=p.score_initial_economy+s.finance.firm_profit.US_AI*p.score_profit_scale;
-    diplomacy=Object.values(s.politics.alignment).reduce((a,b)=>a+b,0)/3;fiscal=s.finance.government_budgets.US_GOV*p.score_fiscal_scale;}
-  else {const country=role==='NL_GOV'?'NL':role==='JP_GOV'?'JP':'KR';technology=role==='TSMC'?s.capacity.tsmc_total:s.capacity.global_hbm;economy=p.score_initial_economy+(role==='TSMC'?s.finance.firm_profit.TSMC:s.finance.industry_profit[country])*p.score_profit_scale;
-    diplomacy=role==='TSMC'?100:s.politics.alignment[`US_${country}`];fiscal=role==='TSMC'?s.finance.firm_cash.TSMC:s.finance.government_budgets[role as 'NL_GOV'];}
+  else if(cn){
+    technology=100*(p.score_cn_usable_weight*flows.cn_usable_ai+p.score_cn_domestic_weight*flows.cn_domestic_ai_output)/Math.max(1,p.demand_cn);
+    const income=s.finance.firm_profit.CN_DESIGN+s.finance.firm_profit.CN_FAB+s.finance.cn_material_export_revenue*p.score_material_income_weight;
+    const reference=initial.firm_profit.CN_DESIGN+initial.firm_profit.CN_FAB+initial.cn_material_export_revenue*p.score_material_income_weight;
+    economy=economyIndex(income,reference);
+    diplomacy=100-(s.policy.cn_ga+s.policy.cn_ge)*p.score_material_diplomacy_penalty;fiscal=budgetIndex('CN_GOV');
+  }
+  else if(us){
+    const controlledTradeSecurity=100*(1-flows.cn_legal_ai_import/Math.max(1,p.order_cn));
+    technology=s.technology.us_ai_frontier*p.score_us_frontier_weight+controlledTradeSecurity*p.score_us_security_weight;
+    economy=economyIndex(s.finance.firm_profit.US_AI-flows.us_exporter_loss*p.score_export_loss_weight,initial.firm_profit.US_AI);
+    diplomacy=Object.values(s.politics.alignment).reduce((a,b)=>a+b,0)/3;fiscal=budgetIndex('US_GOV');
+  }
+  else {const country=role==='NL_GOV'?'NL':role==='JP_GOV'?'JP':'KR';technology=s.capacity.global_hbm;
+    economy=economyIndex(s.finance.industry_profit[country],initial.industry_profit[country]);
+    diplomacy=s.politics.alignment[`US_${country}`];fiscal=budgetIndex(role as GovernmentId);}
   const dimensions={technology:round(clamp(technology)),economy:round(clamp(economy)),diplomacy:round(clamp(diplomacy)),fiscal:round(clamp(fiscal))};
   const w=s.private.weights[role];
   const longTermPotential=round(Math.min(p.score_longterm_cap,s.pending_projects.filter(x=>cn?x.owner.startsWith('CN'):us?x.owner.startsWith('US'):x.owner===role).reduce((sum,x)=>sum+x.invest*p.project_discount/Math.max(1,x.due_turn-s.turn+1),0)));
   const total=round(clamp(dimensions.technology*w.security+dimensions.economy*w.industry+dimensions.diplomacy*w.diplomacy+dimensions.fiscal*w.fiscal-flows.supply_chain_risk*p.score_risk_penalty+longTermPotential));
   const label=dimensions.fiscal<p.score_fiscal_warning?'产业推进，财政承压':cn?(flows.cn_domestic_ai_output>flows.cn_legal_ai_import?'自主供给积累':'进口与国产协同'):(flows.us_exporter_loss>p.score_export_loss_warning?'技术遏制伴随商业损失':'安全与产业的有限平衡');
-  return {dimensions,total,label,longTermPotential,explanation:`技术/算力、经济、外交、财政按本角色公开权重计分。未兑现项目仅计折现潜力 ${longTermPotential}，不计入实际交付。[G]`};
+  const technologyExplanation=role==='CN_GOV'?`技术/算力由可用算力覆盖（权重 ${p.score_cn_usable_weight}）与国产交付覆盖（权重 ${p.score_cn_domestic_weight}）组成，均以需求为参照`:
+    role==='US_GOV'?`技术/安全由技术前沿（权重 ${p.score_us_frontier_weight}）与受控贸易边界（权重 ${p.score_us_security_weight}）组成`:'技术维度读取本角色产业能力';
+  const financeExplanation=role.endsWith('_GOV')?'财政以开局预算加六轮常规补充的总额为参照':'现金以开局现金的配置倍数为参照';
+  return {dimensions,total,label,longTermPotential,explanation:`${technologyExplanation}。经济以开局收益的 ${p.score_economy_target_multiple} 倍为目标参照，${role==='CN_GOV'?'含材料出口收入折算；':role==='US_GOV'?'计入企业利润并扣除出口机会损失折算；':''}${financeExplanation}。四维按本角色偏好加权并扣除供应风险。未兑现项目仅计折现潜力 ${longTermPotential}，不计入实际交付。[G]`};
 }
 export function publicIndicators(s:GameState,flows=calculateFlows(s)):Indicators {
   const {tsmc_delivered:_,other_market:__,ga_consumed:___,ge_consumed:____,ga_imports:_____,ge_imports:______,...indicators}=flows;

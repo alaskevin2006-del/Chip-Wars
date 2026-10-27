@@ -8,13 +8,14 @@ export function getLegalActions(s:GameState,role:AgentId):LegalAction[] {
   if(s.finished) return [];
   const out:LegalAction[]=[];
   const add=(id:ActionId,label:string,target?:string,level?:number,explanation='依照当前许可与实际产业瓶颈结算',direction='改善本方产业收益',risk='可能增加财政或商业成本')=>{
-    const delay=s.config.delays[id];
+    const delay=id==='US_SUPPORT'&&target==='rd'?0:s.config.delays[id];
     const late=delay>0&&s.turn+delay>s.config.maxTurns;
     out.push({id,actor:role,label,target,level,ap_cost:id==='HOLD'?0:1,money_cost:s.config.costs[id],preconditions:['不越权','AP与资金充足','遵守适用许可'],effective_at:s.turn+delay,duration:id==='NL_SUPPORT'||id==='JP_SUPPORT'?1:delay>0?Math.max(1,s.config.maxTurns-s.turn-delay+1):1,explanation:explanation+(late?'；本局来不及兑现，仅计长期潜力':''),direction,risk:late?'仅计入折现长期潜力，不计当期产量':risk});
   };
   const license=(id:ActionId,key:keyof GameState['policy'],label:string,target?:string)=>{
     const old=s.policy[key] as number;
-    for(const level of [old-1,old+1]) if(level>=0&&level<=2) add(id,`${level>old?'收紧':'放宽'}${label}`,target,level,'只改变下一步合法新增供给，不删除已有设备',level>old?'限制新增交付，增强管制姿态':'增加合法交易空间，缓和商业损失','安全目标与企业收益存在取舍');
+    const explanation=id==='CN_MATERIAL_LICENSE'?'分别影响对应材料合法出口与相关下游成本，既有库存缓冲短缺':'只改变下一步合法新增供给，不删除已有设备';
+    for(const level of [old-1,old+1]) if(level>=0&&level<=2) add(id,`${level>old?'收紧':'放宽'}${label}`,target,level,explanation,level>old?'限制新增交付，增强管制姿态':'增加合法交易空间，缓和商业损失','安全目标与企业收益存在取舍');
   };
   switch(role){
     case 'US_GOV':
