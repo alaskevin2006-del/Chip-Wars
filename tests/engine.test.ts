@@ -1,11 +1,11 @@
 import {describe,it,expect} from 'vitest';
-import {AGENT_IDS,ACTION_IDS,DEFAULT_CONFIG,createGame,getObservation,getLegalActions,validateDecision,resolveTurn,projectPhase,deriveIndicators,type Action,type AgentId,type Decisions,type GameState,type PlayerRole} from '../src/engine';
+import {AGENT_IDS,ACTION_IDS,DEFAULT_CONFIG,createGame,getObservation,getLegalActions,validateDecision,resolveTurn,projectPhase,deriveIndicators,type Action,type AgentDecision,type AgentId,type Decisions,type GameConfig,type GameState,type PlayerRole} from '../src/engine';
 import {decideRule} from '../src/agents/rule';
 import {calculateFlows} from '../src/engine/economy';
 
 const game=(role:PlayerRole='CN_GOV',seed=42)=>createGame(DEFAULT_CONFIG,seed,role);
-function phased(s:GameState):Decisions{
-  const d:Decisions={};for(const role of ['US_GOV','CN_GOV'] as const)d[role]=decideRule(getObservation(s,role));
+function phased(s:GameState,playerDecision?:AgentDecision):Decisions{
+  const d:Decisions={};for(const role of ['US_GOV','CN_GOV'] as const)d[role]=role===s.playerRole&&playerDecision?playerDecision:decideRule(getObservation(s,role));
   const third=projectPhase(s,d,'S2_THIRD_GOV',s.config);for(const role of ['NL_GOV','JP_GOV','KR_GOV'] as const)d[role]=decideRule(getObservation(third,role));
   const firms=projectPhase(s,d,'S3_FIRMS',s.config);for(const role of ['US_AI','CN_DESIGN','CN_FAB','TSMC'] as const)d[role]=decideRule(getObservation(firms,role));return d;
 }
@@ -122,7 +122,8 @@ describe('industrial and physical invariants',()=>{
   });
   it('score dimensions use each firm own technology, profit and cash account',()=>{
     const s=game();s.finance.firm_cash.CN_DESIGN=0;
-    expect(getObservation(s,'CN_DESIGN').publicState.indicators.player_score.dimensions.fiscal).toBe(0);expect(getObservation(s,'CN_GOV').publicState.indicators.player_score.dimensions.fiscal).toBe(100);
+    expect(getObservation(s,'CN_DESIGN').publicState.indicators.player_score.dimensions.fiscal).toBe(0);
+    expect(getObservation(s,'CN_GOV').publicState.indicators.player_score.dimensions.fiscal).toBeCloseTo(100*100/(100+6*5));
   });
 });
 

@@ -33,6 +33,8 @@ export const DEFAULT_CONFIG: GameConfig = {
     score_risk_penalty:.06,score_initial_economy:55,score_initial_diplomacy:50,score_fiscal_scale:1,
     score_longterm_cap:6,
     score_material_diplomacy_penalty:10,score_fiscal_warning:35,score_export_loss_warning:15,
+    score_cn_usable_weight:.55,score_cn_domestic_weight:.45,score_us_frontier_weight:.6,score_us_security_weight:.4,
+    score_economy_base:25,score_economy_target_multiple:3,score_material_income_weight:.5,score_firm_cash_target_multiple:2,score_export_loss_weight:.5,
     rule_cost_divisor:3,rule_horizon_divisor:3,rule_chip_security_gain:18,rule_chip_security_relax:12,
     rule_chip_trade_loss:8,rule_us_pressure_tight:.5,rule_us_pressure_relax:.65,rule_trade_recovery:4,
     rule_diplomatic_tight:2,rule_diplomatic_relax:3,rule_tool_security_gain:14,rule_tool_security_relax:10,
