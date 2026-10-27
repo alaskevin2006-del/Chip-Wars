@@ -1,11 +1,6 @@
-import type { AgentId,AgentObservation,Decisions,GameConfig,GameState,Indicators,LegalAction,Phase,PlayerRole,RandomInputs,Score,TurnResult,ValidationResult,AgentDecision } from './types';
 export * from './types';
-const pending = ():never => { throw new Error('Stage 0 placeholder: engine implementation pending'); };
-export const createGame = (_config:GameConfig,_seed:number,_role:PlayerRole):GameState => pending();
-export const getObservation = (_state:GameState,_role:AgentId):AgentObservation => pending();
-export const getLegalActions = (_state:GameState,_role:AgentId):LegalAction[] => pending();
-export const validateDecision = (_state:GameState,_role:AgentId,_decision:AgentDecision):ValidationResult => pending();
-export const resolveTurn = (_state:GameState,_decisions:Decisions,_random:RandomInputs,_config:GameConfig):TurnResult => pending();
-export const projectPhase = (_state:GameState,_decisions:Decisions,_phase:Phase,_config:GameConfig):GameState => pending();
-export const deriveIndicators = (_state:GameState):Indicators => pending();
-export const scoreGame = (_state:GameState,_role:AgentId):Score => pending();
+export {DEFAULT_CONFIG} from './config';
+export {createGame,projectPhase,resolveTurn} from './turn';
+export {getLegalActions,validateDecision} from './actions';
+export {getObservation} from './observation';
+export {deriveIndicators,scoreGame} from './economy';
