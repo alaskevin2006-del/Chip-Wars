@@ -1,0 +1,17 @@
+[Unit]
+Description=Chip-Wars isolated game service
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=@ROOT@
+ExecStart=/usr/bin/docker run --rm --name chip-wars --label app=chip-wars --user 1000:1000 --read-only --cap-drop=ALL --security-opt=no-new-privileges --pids-limit=100 --memory=256m --cpus=0.5 --tmpfs /tmp:rw,noexec,nosuid,size=16m --publish @PORT@:@PORT@ --env-file @ENV@ --mount type=bind,src=@ROOT@/current,dst=/app,readonly --mount type=bind,src=@ROOT@/runtime,dst=/state --workdir /app @IMAGE@ node server/index.mjs
+ExecStop=/usr/bin/docker stop --time 10 chip-wars
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target
