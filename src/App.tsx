@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { Activity, ArrowUpRight, CircleHelp, FileText, Flag, Globe2, LayoutDashboard, LoaderCircle, RotateCcw, X } from 'lucide-react';
 import type { LegalAction, PlayerRole, Action } from './engine/types';
 import { type GameAdapter, type GameSnapshot, roleNames } from './ui/adapter';
-import { createMockAdapter } from './ui/mock';
+import { createEngineAdapter } from './game/adapter';
+import { decideLLM } from './agents/llm';
 import { Brand, Disclaimer, ModeBadge } from './ui/common';
 import { StartScreen } from './ui/StartScreen';
 import { GameScreen, toggleAction } from './ui/GameScreen';
@@ -10,7 +11,7 @@ import { ReportScreen } from './ui/ReportScreen';
 import { EndingScreen } from './ui/EndingScreen';
 import './ui/styles.css';
 
-const defaultAdapter = createMockAdapter();
+const defaultAdapter = createEngineAdapter({llmDecider:decideLLM});
 export default function App({ adapter = defaultAdapter }: { adapter?: GameAdapter }) {
   const [screen, setScreen] = useState<'start'|'game'|'report'|'ending'>('start');
   const [role,setRole] = useState<PlayerRole>('CN_GOV');
@@ -20,7 +21,7 @@ export default function App({ adapter = defaultAdapter }: { adapter?: GameAdapte
   const [busy,setBusy] = useState(false);
   const [error,setError] = useState('');
   const [help,setHelp] = useState(false);
-  function start() { try { setSnapshot(adapter.start(role,{useLLM,seed:2027})); setSelected([]); setError(''); setScreen('game'); } catch { setError('开局失败，请重试。'); } }
+  function start() { try { setSnapshot(adapter.start(role,{useLLM,seed:2027})); setSelected([]); setError(''); setScreen('game'); window.scrollTo?.({top:0,behavior:'instant'}); } catch { setError('开局失败，请重试。'); } }
   async function submit(actions: Action[]) {
     if (busy) return;
     setBusy(true); setError('');
