@@ -48,7 +48,8 @@ test -f "$RELEASE/dist/index.html"
 test -f "$RELEASE/server/index.mjs"
 test -f "$RELEASE/ops/chip-wars.service.template"
 sudo -n docker image inspect "$IMAGE" >/dev/null 2>&1 || sudo -n docker pull "$IMAGE"
-OLD=$(readlink -f "$ROOT/current" 2>/dev/null || true)
+source "$RELEASE/ops/release-paths.sh"
+OLD=$(chip_wars_current_release "$ROOT")
 if [[ -n "$OLD" ]]; then
   [[ "$OLD" == "$ROOT/releases/"* && -d "$OLD" ]] || { echo 'Unexpected current release'; exit 1; }
   ln -sfn "$OLD" "$ROOT/previous"
