@@ -1,5 +1,35 @@
-# Execution log
+# 验收与交接记录
 
-2026-10-27 (Asia/Shanghai): Baseline found at .doc/baseline-v3.md and copied verbatim to docs/game-baseline-v3.md. Local folder initially contained documents only and inherited an unrelated parent Git repository; initialized an independent repository inside Chip-Wars. Stage 0 defines explicit engine placeholders; no engine completion is claimed.
+日期：2026-10-27，北京时间。唯一规格：`docs/game-baseline-v3.md`，从原 `.doc/baseline-v3.md` 原文复制。初始文件夹只有文档，继承了父级无关 Git 仓库；已在项目内建立独立仓库，未操作父级文件。
 
-Pending: skeleton checks, initial commit/push, isolated feature implementation, integrated two-role six-round tests, browser smoke, optional provider verification, isolated server preflight/deployment and live verification. Credentials are never part of this log.
+## 已完成阶段
+
+| 阶段 | 实际操作与结果 |
+|---|---|
+| 0 基础与契约 | Vite/React/TypeScript、冻结类型、阶段协议、目录归属、环境示例、明确占位实现。`npm run typecheck`、`npm run test`（1 项）、`npm run build` 均通过。首个 main 提交并推送：`9a8e2264a32b757258e11fae4244284b0a90d943`。 |
+| 1 独立分支 | 四个 `git worktree add -b feat/{engine,ui,llm,deploy}` 成功；工作树独立，依赖通过本机 node_modules 目录联接复用。 |
+| 2A 引擎 | `e35bba344ea14e41cfe14a7748f94aa410ae7753` 已推送；类型检查、23 项测试、构建通过。九角色、24 模板（邀约按规格隐藏）、M1–M6、六轮、阶段校验、资金/库存/许可/延迟、观察裁剪、确定性与商业反馈已实现。 |
+| 2B 界面 | `378d841dad71c0a370494013dd0528df9149f1c8` 已推送；类型检查、6 项测试、构建通过。四屏及手机布局；预览适配器独立，生产入口已替换为真实引擎。 |
+| 3A 模型代理 | `7a2d76de862f20f65be201516a74982506f9dd6e` 已推送；类型检查、48 项测试、构建通过。合法动作 JSON、一次格式重试、超时兜底、同源/请求大小/AP/资金/并发/IP频率/持久化每日额度限制。 |
+| 3B 部署准备 | `2aa9af0` 已推送。`bash -n ops/deploy.sh`、`bash -n ops/preflight.sh`、`bash -n ops/rollback.sh` 均通过。独立服务、不可变版本目录、健康检查、仅本项目回滚。服务器只读预检：候选新端口无占用，磁盘充足，有 Docker 与官方 Node 24 镜像，无宿主 Node。 |
+
+## 集成验收
+
+分支：`integrate/mvp`，以 merge commit 保留四个功能分支历史。`src/game/adapter.ts` 是唯一对局调度入口：两大国从同一初态封闭决策，三方政府与四家企业各自从相同阶段投影决策，最终从原始状态统一结算。模型仅用于一个对手政府；无模型、错误响应、非法动作、异常均使用规则决策。返回界面前裁剪其他企业现金及对手私有理由，并复制快照，防止界面修改权威状态；重开与异步回复之间有隔离。
+
+实际执行：
+
+- `npm run typecheck`：通过（集成时发现测试多余类型注释，已删除）。
+- `npm run test`：91/91 通过，7 个测试文件。包含两阵营各六轮、三类模型故障各六轮、真实观察数据通过 HTTP 代理与客户端六轮、重开期间旧模型响应及重复提交保护、确定性、不可变输入、法律/AP/资金/库存/代工合同/HBM/材料用途/延迟/政企反馈。
+- `npm run build`：通过，生产 JS 约 304 kB，gzip 约 97 kB；CSS 约 40 kB，gzip 约 9 kB。
+- `npm audit --omit=dev --audit-level=high`：0 项漏洞。
+- 浏览器实际操作：中国政府首轮补贴封装+协作后六轮至结局；美国政府首轮收紧芯片+设备后六轮至结局；第三局启用模型但本地无密钥，仍六轮至末轮战报，显示规则兜底。浏览器未见错误/警告。
+- 桌面 1440×1000、手机 390×844 实测页面宽度均无横向溢出；手机完成美国六轮流程。
+
+试玩发现旧版评分容易饱和，已在引擎增量提交 `9e85fe689049724b04f809e3db8402981c4de8f1` 按原规格改进归一化，补充两阵营各三种策略的六轮比较及不同偏好测试；最大补贴体现财政成本，最严限制体现经济成本，不是所有偏好下都最优。开局滚动位置和行动译名已修正，浏览器确认新开局回到顶部。修改后完整类型检查、91项测试、构建与三份部署脚本语法检查全部通过。Git 全历史和前端产物凭据格式扫描均为0命中。
+
+## 尚待完成与明确边界
+
+集成分支最终检查、PR/CI/合并、真实部署和公网验收待完成。当前不能声称已上线，DeepSeek 真实连接尚未验证。
+
+CN_OFFER 首版隐藏；复杂外交、存档回滚和反事实分支为 P2，未实现。荷日产业支持是明确标注的一期延迟经营收益。数值、偏好、系数均 `[G]`。隐藏信息为浏览器逻辑隔离，不防开发者工具。HTTP 试玩缺少传输加密；公开模型代理用固定日额度限流，不能替代账户预算或正式访问控制。敏感凭据仅在服务器私有环境文件配置，不进入此文或仓库。
