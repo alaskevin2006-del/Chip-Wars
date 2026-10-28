@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowDown, ArrowRight, Check, ChevronDown, FileText, Globe2, Info, LockKeyhole, MessageCircle, Pause, Play, RotateCcw, Sparkles, SquareArrowOutUpRight, Users, X } from 'lucide-react';
-import { api, type Session } from './api';
+import { api, ApiError, type Session } from './api';
 import type { ActionKind, DiplomacyAction, Role, Snapshot } from './types';
 import { Avatar, colors, Council, Flag, goals, names, roleIds, WorldMap } from './Illustrations';
 import './styles.css';
@@ -33,9 +33,55 @@ export default function App(){
   const session=useRef<Session|null>(null);const generation=useRef(0);const pending=useRef(false);const controlPending=useRef(false);const end=useRef<HTMLDivElement>(null);
   useEffect(()=>{let active=true;api.health().then(h=>{if(active)setHealth(h.llm)}).catch(()=>{if(active)setHealth(null)});return()=>{active=false}},[]);
   async function start(){if(pending.current||session.current)return;pending.current=true;setBusy(true);setError('');const gen=++generation.current;try{const created=await api.create(mode,rounds,player);if(generation.current!==gen){void api.remove(created).catch(()=>{});return}session.current=created;setSnapshot(created.snapshot);}catch(e){if(generation.current===gen)setError(e instanceof Error?e.message:'无法开始，请确认后端已启动。')}finally{if(generation.current===gen){pending.current=false;setBusy(false)}}}
-  async function step(action?:DiplomacyAction){const s=session.current;if(!s||!snapshot||pending.current||controlPending.current)return;const gen=generation.current;pending.current=true;setBusy(true);setError('');try{const next=await api.step(s,snapshot.version,action);if(generation.current===gen)setSnapshot(next);}catch(e){if(generation.current===gen)setError(e instanceof Error?e.message:'行动未完成，请重试。')}finally{if(generation.current===gen){pending.current=false;setBusy(false)}}}
+  async function step(action?:DiplomacyAction){
+    const s=session.current;
+    if(!s||!snapshot||pending.current||controlPending.current)return;
+    const gen=generation.current,version=snapshot.version;
+    pending.current=true;setBusy(true);setError('');
+    try{
+      const next=await api.step(s,version,action);
+      if(generation.current===gen)setSnapshot(next);
+    }catch(e){
+      if(generation.current!==gen)return;
+      // A lost HTTP response can hide a committed turn. Read authority before any retry.
+      if(!(e instanceof ApiError&&e.status===422)){
+        try{
+          const current=await api.read(s);
+          if(generation.current!==gen)return;
+          setSnapshot(current);
+          if(current.version!==version||current.status!==snapshot.status)return;
+        }catch{/* Keep the retry control available if the reconciliation request also fails. */}
+      }
+      if(generation.current===gen)setError(e instanceof ApiError&&e.status===409?'另一项行动仍在处理。状态已同步，请稍后重试。':e instanceof Error?e.message:'行动未完成，请重试。');
+    }finally{
+      if(generation.current===gen){pending.current=false;setBusy(false)}
+    }
+  }
   useEffect(()=>{if(!snapshot||busy||controlling||error||snapshot.status!=='running'||snapshot.actor===snapshot.player)return;const timer=setTimeout(()=>void step(),650);return()=>clearTimeout(timer)},[snapshot,busy,controlling,error]);
-  async function control(command:'pause'|'resume'){const s=session.current;if(!s||controlPending.current)return;controlPending.current=true;setControlling(true);++generation.current;pending.current=false;setBusy(false);setError('');const gen=generation.current;try{const next=await api.control(s,command);if(generation.current===gen)setSnapshot(next);}catch(e){if(generation.current===gen)setError(e instanceof Error?e.message:'控制请求未完成。')}finally{if(generation.current===gen){controlPending.current=false;setControlling(false)}}}
+  async function control(command:'pause'|'resume'){
+    const s=session.current;if(!s||controlPending.current)return;
+    controlPending.current=true;setControlling(true);
+    // Invalidate the old step before sending pause. Its late response cannot overwrite pause/resume.
+    const gen=++generation.current;
+    pending.current=false;setBusy(false);setError('');
+    try{
+      const next=await api.control(s,command);
+      if(generation.current===gen)setSnapshot(next);
+    }catch(e){
+      if(generation.current!==gen)return;
+      try{const current=await api.read(s);if(generation.current===gen)setSnapshot(current);}catch{}
+      if(generation.current===gen)setError(e instanceof Error?e.message:'控制请求未完成。');
+    }finally{if(generation.current===gen){controlPending.current=false;setControlling(false)}}
+  }
+  async function retry(){
+    const s=session.current;
+    if(!s){setError('');return}
+    if(pending.current||controlPending.current)return;
+    const gen=generation.current;pending.current=true;setBusy(true);
+    try{const current=await api.read(s);if(generation.current===gen){setSnapshot(current);setError('');}}
+    catch(e){if(generation.current===gen)setError(e instanceof Error?e.message:'暂时无法同步，请稍后重试。')}
+    finally{if(generation.current===gen){pending.current=false;setBusy(false)}}
+  }
   function reset(){const previous=session.current;++generation.current;session.current=null;pending.current=false;controlPending.current=false;setSnapshot(null);setBusy(false);setControlling(false);setError('');if(previous)void api.remove(previous).catch(()=>{});}
   const current=snapshot?.actor??null;const waiting=!!snapshot&&snapshot.actor===snapshot.player&&snapshot.status!=='paused'&&snapshot.status!=='completed';
   const messages=(snapshot?.messages??[]).filter(m=>filter==='all'||(filter==='public'?m.is_public:!m.is_public));
@@ -44,7 +90,7 @@ export default function App(){
     <div className="cd-fiction-note"><Info size={15}/><span>假设性情景 · 非现实预测。历史背景、模拟设定与模型生成内容分别标注，任何协议仅在模拟内部成立。</span></div>
     <section className="cd-config" aria-label="模拟设置"><div className="cd-config-label"><span className="cd-section-number">01</span><div><strong>设定你的谈判</strong><small>一个问题，四种立场。</small></div></div><label>运行方式<select aria-label="运行方式" value={mode} disabled={!!snapshot||busy} onChange={e=>setMode(e.target.value as typeof mode)}><option value="demo">演示模式 · 示例脚本</option><option value="live">实时推演 · DeepSeek</option></select></label><label>谈判轮数<select aria-label="谈判轮数" value={rounds} disabled={!!snapshot||busy} onChange={e=>setRounds(Number(e.target.value))}>{[1,2,3,4,5].map(n=><option key={n} value={n}>{n} 轮{n===3?' · 推荐':''}</option>)}</select></label><label>你的角色<select aria-label="你的角色" value={player??'observer'} disabled={!!snapshot||busy} onChange={e=>setPlayer(e.target.value==='observer'?null:e.target.value as Role)}><option value="observer">旁观者 · 四方自主互动</option>{roleIds.map(r=><option key={r} value={r}>{names[r]}</option>)}</select></label><div className="cd-config-actions">{!snapshot?<button className="cd-btn cd-primary" onClick={()=>void start()} disabled={busy||mode==='live'&&!health?.enabled}><Play size={15}/>{busy?'准备中…':'开始模拟'}</button>:<><button className="cd-btn cd-secondary" onClick={()=>void control(snapshot.status==='paused'?'resume':'pause')} disabled={controlling||snapshot.status==='completed'}>{snapshot.status==='paused'?<Play size={14}/>:<Pause size={14}/>} {snapshot.status==='paused'?'继续':'暂停'}</button><button className="cd-icon-btn" aria-label="重置模拟" onClick={reset}><RotateCcw size={17}/></button></>}</div></section>
     <div className="cd-runtime-note"><span className={`cd-mode-badge ${mode==='live'?'live':''}`}>{mode==='demo'?<FileText size={12}/>:<Sparkles size={12}/>} {mode==='demo'?'演示数据 · 非实时 LLM':'实时模型 · 服务端调用'}</span><span>{mode==='demo'?'示例脚本用于体验流程；实时模式由模型自主决策。':health?.enabled?`已配置 ${health.model}，调用结果以记录为准。`:'实时模型尚未配置或后端未连接，请使用演示模式。'}</span></div>
-    {error&&<div role="alert" className="cd-error"><span>{error}</span><button onClick={()=>setError('')}>{snapshot?'重试当前步骤':'关闭'}<X size={14}/></button></div>}
+    {error&&<div role="alert" className="cd-error"><span>{error}</span><button disabled={busy||controlling} onClick={()=>void retry()}>{snapshot?'重试当前步骤':'关闭'}<X size={14}/></button></div>}
     <section className="cd-room" id="council"><div className="cd-panel-heading"><div><span className="cd-section-number">02</span><h2>外交会议室</h2><span className="cd-heading-caption">THE COUNCIL</span></div><span className={`cd-session-status ${busy?'active':''}`}><i/>{!snapshot?'等待开场':snapshot.status==='completed'?'本次推演结束':snapshot.status==='paused'?'已暂停':waiting?'等待你的行动':busy?'正在生成行动…':'准备下一位发言'}</span></div><WorldMap/><div className="cd-council-divider"><span>各方目标</span><i/><small>独立角色 · 独立信息 · 依次决策</small></div><Council actor={current} status={activeStatus}/><div className="cd-room-footer"><span><Users size={14}/>4 个参与方 <b>·</b> 3 个政府 / 1 家企业</span><span>{snapshot?`第 ${Math.min(snapshot.round,snapshot.rounds)} / ${snapshot.rounds} 轮`:'从尚未解决的争议开始'}<ArrowDown size={13}/></span></div></section>
     <div className="cd-lower-grid"><section className="cd-dialogue" id="dialogue"><div className="cd-panel-heading"><div><span className="cd-section-number">03</span><h2>外交互动记录</h2><span className="cd-heading-caption">THE CONVERSATION</span></div><span className="cd-record-count">{snapshot?.messages.length??0} 条可见记录</span></div><div className="cd-feed-tools"><div role="group" aria-label="记录筛选">{(['all','public','private'] as const).map((f,i)=><button key={f} className={filter===f?'selected':''} onClick={()=>setFilter(f)}>{['全部','公开记录','私有通信'][i]}</button>)}</div><span><LockKeyhole size={12}/>{snapshot?.player?'仅显示你有权查看的信息':'旁观者仅查看公开信息'}</span></div>{!snapshot?<div className="cd-empty"><MessageCircle size={32} strokeWidth={1}/><h3>每一次选择，都从一句话开始。</h3><p>选择运行方式与角色，开启第一轮外交互动。</p><span>公开声明 / 定向通信 / 谈判提案 / 最终决策</span></div>:<><div className="cd-feed" aria-live="polite">{messages.length===0&&<div className="cd-empty cd-empty-small"><MessageCircle size={25}/><p>{filter==='private'?'没有你有权查看的私有通信。':'秘书正在准备第一条外交记录。'}</p></div>}{messages.map((m,i)=><article className="cd-message" key={m.id} id={`message-${m.id}`}>{(i===0||messages[i-1].round!==m.round)&&<div className="cd-round-divider"><span>ROUND {String(m.round).padStart(2,'0')}</span><i/></div>}<div className="cd-message-body"><div className="cd-message-avatar" style={{background:`${colors[m.agent]}16`}}><Avatar role={m.agent}/></div><div className="cd-message-main"><div className="cd-message-meta"><strong>{names[m.agent]}</strong><span>{labels[m.action]}</span><small>{sourceLabels[m.source]}</small><em>{m.is_public?'公开':<><LockKeyhole size={11}/>私有</>}</em></div>{m.target&&<div className="cd-message-target">致 {names[m.target]}{m.proposal_id&&` · ${m.proposal_id}`}</div>}<p>{m.content}</p>{m.reason&&<details><summary>公开理由<ChevronDown size={12}/></summary><p>{m.reason}</p></details>}</div></div></article>)}{snapshot.errors.map((err,i)=><div className="cd-step-error" key={`${err.round}-${err.agent}-${i}`}><Info size={14}/><span>第 {err.round} 轮 · {names[err.agent]}：{err.message}。未记录成功决策。</span></div>)}<div ref={end}/></div>{waiting&&<PlayerComposer key={`${snapshot.round}-${snapshot.actor}`} snapshot={snapshot} busy={busy||controlling} onSubmit={a=>void step(a)}/>}<div className="cd-feed-footer"><span><span className={busy?'cd-live-dot':''}/>{snapshot.status==='completed'?'所有轮次已结束，请查看下方最终决策。':waiting?'秘书等待你的行动输入。':snapshot.status==='paused'?'推演已暂停，可继续或重新开始。':busy?'当前角色正在生成行动，秘书将验证权限与提案状态。':'按固定角色顺序推进，每次记录一个实际发生的行动。'}</span></div></>}</section>
     <aside className="cd-side"><section className="cd-proposals"><div className="cd-side-heading"><span>谈判桌上的提案</span><FileText size={17}/></div><p className="cd-side-subtitle">声明不等于共识。只有有效提案获得相应参与者同意，才标记为模拟内部达成。</p>{!snapshot?.proposals.length?<div className="cd-no-proposals"><span>—</span><p>尚无可见提案</p><small>谈判开始后在此跟踪进展</small></div>:snapshot.proposals.map(p=><article className="cd-proposal" key={p.id}><div><span className={`cd-proposal-state ${p.status}`}>{p.status==='accepted'&&<Check size={11}/>} {proposalLabels[p.status]}</span><small>{p.is_public?'公开':'私有'}</small></div><h3>{names[p.agent]}<ArrowRight size={12}/>{names[p.target]}</h3><p>{p.content}</p><span>{p.id} · 第 {p.round} 轮 · {p.scope==='commercial'?'商业提案':'外交提案'}</span></article>)}</section><div className="cd-secretary-note"><span>秘书的工作笔记</span><p>“每一方只能决定自己的行动。对话可以影响判断，但不能替另一方作出承诺。”</p><small>权限校验 · 提案追踪 · 信息隔离</small></div><button className="cd-source-link" onClick={()=>setSources(true)}>这场模拟基于什么？<SquareArrowOutUpRight size={14}/></button></aside></div>
