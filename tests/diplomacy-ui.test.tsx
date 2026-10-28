@@ -18,6 +18,9 @@ describe('Chip Diplomacy interface',()=>{
     expect((screen.getByRole('button',{name:'开始模拟'}) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText(/实时模型尚未配置/)).toBeTruthy();
     expect(screen.getAllByRole('img',{name:/卡通代表/})).toHaveLength(4);
+    const legend=screen.getByLabelText('地图角色图例');
+    expect(legend.textContent).toContain('美国');expect(legend.textContent).toContain('荷兰');expect(legend.textContent).toContain('中国');
+    expect(legend.textContent).toContain('ASML 总部位于此');
   });
   it('replaces the controlled role decision with player text and keeps private routing',async()=>{
     const playerState={...snapshot,player:'USA' as const,status:'awaiting_player' as const};
