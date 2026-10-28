@@ -1,16 +1,6 @@
-# Chip-Wars implementation boundaries
+# Chip Diplomacy implementation boundaries
 
-Read docs/game-baseline-v3.md and docs/contracts.md before changing code. V3.0 is the only game specification. Exactly nine agents and 24 action templates plus HOLD. Every numerical coefficient is a game assumption [G]. No extra economic simulation, database or framework.
-
-Never commit credentials or server identity. All provider credentials are server environment variables. Do not alter other server projects, ports, default sites or services. No global restarts or upgrades.
-
-Feature tasks use separate branches and worktrees. Delegation is explicitly requested for the engine and UI tasks after stage 0 completes. Owners:
-- feat/engine: src/engine/** except frozen types.ts, src/agents/rule.ts, tests/engine*, tests/agents*.
-- feat/ui: src/ui/**, src/App.tsx, UI styles, tests/ui*.
-- feat/llm: server/**, src/agents/llm.ts, tests/llm*.
-- feat/deploy: ops/**, docs/deployment.md.
-- Coordinator/integrator: shared contract/types, root dependencies, docs, orchestration integration and CI.
-
-Do not modify frozen exports or shared types in feature tasks. Propose changes to coordinator. resolveTurn is deterministic, immutable and has no network, UI or clock. Agent observations hide all other agents' private information. Rule fallback must complete six rounds for either player.
-
-Run npm run typecheck, npm run test and npm run build. Report real results. Do not claim live deployment or provider access without verification.
+User confirmed 2026-10-29: supersede V3 with four-agent text diplomacy. Preserve Chip-Wars source and history. docs/diplomacy-contracts.md is new contract; old V3/contracts govern legacy only.
+Exactly USA, China, Netherlands, ASML. Default three rounds, configurable 1–5. No economic scores, database, extra framework or fabricated model success. Demo explicitly labeled. Server holds keys and private sessions. No chain of thought.
+Feature tasks use separate branches/worktrees. Delegate engine and UI after stage 0. Engine owns server/diplomacy/{engine,scenario,demo}.mjs and tests/diplomacy-engine*. UI owns src/diplomacy/** except types.ts and tests/diplomacy-ui*. Coordinator owns shared types, HTTP/provider integration, root configuration, archives and docs. Preserve all old gameplay modules.
+Never commit credentials or server identities. Do not change unrelated services or global settings. Preserve local ports 3000/5001. Run npm run typecheck, npm run test, npm run build; report real results.
