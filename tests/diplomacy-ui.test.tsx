@@ -6,27 +6,61 @@ import App from '../src/diplomacy/App';
 import { api, ApiError, type Session } from '../src/diplomacy/api';
 import type { Snapshot } from '../src/diplomacy/types';
 vi.mock('../src/diplomacy/api',async importOriginal=>{const original=await importOriginal<typeof import('../src/diplomacy/api')>();return {...original,api:{health:vi.fn(),create:vi.fn(),read:vi.fn(),step:vi.fn(),control:vi.fn(),remove:vi.fn()}}});
-const snapshot:Snapshot={id:'test',version:0,mode:'demo',rounds:3,round:1,actor:'USA',player:null,status:'running',messages:[],proposals:[],decisions:{},errors:[],roles:[],scenario:{title:'Test',description:'Fiction',facts:[],assumptions:[]}};
+const snapshot:Snapshot={id:'test',version:0,mode:'live',rounds:3,round:1,actor:'USA',player:null,status:'running',messages:[],proposals:[],decisions:{},errors:[],roles:[],scenario:{title:'Test',description:'Fiction',facts:[],assumptions:[]}};
 const session=(s:Snapshot):Session=>({id:'test',token:'session-token',snapshot:s});
-beforeEach(()=>{vi.mocked(api.health).mockResolvedValue({status:'ok',llm:{enabled:false,model:'deepseek-flash'}});vi.mocked(api.remove).mockResolvedValue({});});
+beforeEach(()=>{vi.mocked(api.health).mockResolvedValue({status:'ok',llm:{enabled:true,model:'deepseek-flash'}});vi.mocked(api.remove).mockResolvedValue({});});
 afterEach(()=>{cleanup();vi.resetAllMocks();});
 describe('Chip Diplomacy interface',()=>{
-  it('clearly labels fixed demo and does not enable unconfigured live model',async()=>{
-    render(<App/>);await waitFor(()=>expect(api.health).toHaveBeenCalled());
-    expect(screen.getByText('演示数据 · 非实时 LLM')).toBeTruthy();
-    fireEvent.change(screen.getByLabelText('运行方式'),{target:{value:'live'}});
+  it('exposes only live mode and disables start for an unconfigured model',async()=>{
+    vi.mocked(api.health).mockResolvedValue({status:'ok',llm:{enabled:false,model:'deepseek-flash'}});
+    render(<App/>);await screen.findByText(/模型不可用/);
+    const mode=screen.getByLabelText('运行方式') as HTMLSelectElement;
+    expect(mode.disabled).toBe(true);expect(mode.value).toBe('live');expect(mode.options).toHaveLength(1);
+    expect(screen.queryByText(/演示|示例脚本/)).toBeNull();
     expect((screen.getByRole('button',{name:'开始模拟'}) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText(/实时模型尚未配置/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button',{name:'开始模拟'}));expect(api.create).not.toHaveBeenCalled();
     expect(screen.getAllByRole('img',{name:/卡通代表/})).toHaveLength(4);
     expect(screen.queryByRole('img',{name:/地理关系示意图/})).toBeNull();
     expect(screen.getByRole('tab',{name:/对话记录/}).getAttribute('aria-selected')).toBe('true');
     expect(screen.getByRole('tab',{name:/最终决策/})).toBeTruthy();
+    fireEvent.click(screen.getByRole('button',{name:/情景与来源/}));
+    expect(screen.queryByText(/演示|示例脚本/)).toBeNull();
+  });
+  it('keeps start disabled when health is pending or the backend is unavailable',async()=>{
+    let fail:(error:Error)=>void=()=>{};
+    vi.mocked(api.health).mockImplementation(()=>new Promise((_resolve,reject)=>{fail=reject}));
+    render(<App/>);
+    expect((screen.getByRole('button',{name:'开始模拟'}) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText('正在检查服务端模型配置…')).toBeTruthy();
+    await act(async()=>fail(new Error('offline')));
+    expect(screen.getByText(/模型不可用/)).toBeTruthy();
+    expect((screen.getByRole('button',{name:'开始模拟'}) as HTMLButtonElement).disabled).toBe(true);
+    expect(api.create).not.toHaveBeenCalled();
+  });
+  it('starts with a live request and preserves the selected rounds and role',async()=>{
+    vi.mocked(api.create).mockResolvedValue(session({...snapshot,status:'paused'}));
+    render(<App/>);
+    await waitFor(()=>expect((screen.getByRole('button',{name:'开始模拟'}) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.change(screen.getByLabelText('谈判轮数'),{target:{value:'5'}});
+    fireEvent.change(screen.getByLabelText('你的角色'),{target:{value:'ASML'}});
+    fireEvent.click(screen.getByRole('button',{name:'开始模拟'}));
+    await waitFor(()=>expect(api.create).toHaveBeenCalledWith('live',5,'ASML'));
+  });
+  it('requests live defaults and reports provider failure without a scripted fallback',async()=>{
+    vi.mocked(api.create).mockRejectedValue(new ApiError('DeepSeek 服务暂时不可用',503));
+    render(<App/>);
+    await waitFor(()=>expect((screen.getByRole('button',{name:'开始模拟'}) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole('button',{name:'开始模拟'}));
+    await screen.findByText('DeepSeek 服务暂时不可用');
+    expect(api.create).toHaveBeenCalledExactlyOnceWith('live',3,null);
+    expect(api.step).not.toHaveBeenCalled();
+    expect(screen.queryByText(/演示|示例脚本/)).toBeNull();
   });
   it('replaces the controlled role decision with player text and keeps private routing',async()=>{
     const playerState={...snapshot,player:'USA' as const,status:'awaiting_player' as const};
     vi.mocked(api.create).mockResolvedValue(session(playerState));
     vi.mocked(api.step).mockResolvedValue({...playerState,version:1,actor:'China',status:'paused'});
-    render(<App/>);fireEvent.change(screen.getByLabelText('你的角色'),{target:{value:'USA'}});fireEvent.click(screen.getByRole('button',{name:'开始模拟'}));
+    render(<App/>);await waitFor(()=>expect((screen.getByRole('button',{name:'开始模拟'}) as HTMLButtonElement).disabled).toBe(false));fireEvent.change(screen.getByLabelText('你的角色'),{target:{value:'USA'}});fireEvent.click(screen.getByRole('button',{name:'开始模拟'}));
     await screen.findByText('现在由你代表美国政府发言');
     expect(api.step).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText('行动类型'),{target:{value:'message'}});
@@ -40,10 +74,10 @@ describe('Chip Diplomacy interface',()=>{
     vi.mocked(api.create).mockResolvedValue(session(snapshot));
     let finish:(s:Snapshot)=>void=()=>{};
     vi.mocked(api.step).mockImplementation(()=>new Promise(resolve=>{finish=resolve}));
-    render(<App/>);fireEvent.click(screen.getByRole('button',{name:'开始模拟'}));
+    render(<App/>);await waitFor(()=>expect((screen.getByRole('button',{name:'开始模拟'}) as HTMLButtonElement).disabled).toBe(false));fireEvent.click(screen.getByRole('button',{name:'开始模拟'}));
     await waitFor(()=>expect(api.step).toHaveBeenCalledTimes(1),{timeout:2000});
     fireEvent.click(screen.getByRole('button',{name:'重置模拟'}));
-    await act(async()=>finish({...snapshot,version:1,messages:[{id:'late',round:1,agent:'USA',action:'statement',target:null,content:'旧局迟到消息',reason:'',is_public:true,proposal_id:null,source:'demo'}]}));
+    await act(async()=>finish({...snapshot,version:1,messages:[{id:'late',round:1,agent:'USA',action:'statement',target:null,content:'旧局迟到消息',reason:'',is_public:true,proposal_id:null,source:'llm'}]}));
     expect(screen.queryByText('旧局迟到消息')).toBeNull();
     expect(screen.getByRole('button',{name:'开始模拟'})).toBeTruthy();
     expect(api.remove).toHaveBeenCalledTimes(1);
@@ -51,7 +85,7 @@ describe('Chip Diplomacy interface',()=>{
   it('requires a final decision in the last round, and never invents missing decisions',async()=>{
     const final={...snapshot,round:3,player:'USA' as const,status:'awaiting_player' as const};
     vi.mocked(api.create).mockResolvedValue(session(final));
-    render(<App/>);fireEvent.click(screen.getByRole('button',{name:'开始模拟'}));
+    render(<App/>);await waitFor(()=>expect((screen.getByRole('button',{name:'开始模拟'}) as HTMLButtonElement).disabled).toBe(false));fireEvent.click(screen.getByRole('button',{name:'开始模拟'}));
     await screen.findByLabelText('行动类型');
     expect((screen.getByLabelText('行动类型') as HTMLSelectElement).value).toBe('decision');
     expect((screen.getByLabelText('行动类型') as HTMLSelectElement).options).toHaveLength(1);
@@ -64,7 +98,7 @@ describe('Chip Diplomacy interface',()=>{
     vi.mocked(api.create).mockResolvedValue(session(playerState));
     vi.mocked(api.step).mockRejectedValue(new TypeError('response connection lost'));
     vi.mocked(api.read).mockResolvedValue(committed);
-    render(<App/>);fireEvent.click(screen.getByRole('button',{name:'开始模拟'}));
+    render(<App/>);await waitFor(()=>expect((screen.getByRole('button',{name:'开始模拟'}) as HTMLButtonElement).disabled).toBe(false));fireEvent.click(screen.getByRole('button',{name:'开始模拟'}));
     await screen.findByLabelText('外交文本');
     fireEvent.change(screen.getByLabelText('外交文本'),{target:{value:'已经记录的玩家行动'}});
     fireEvent.click(screen.getByRole('button',{name:'提交本轮行动'}));
@@ -76,7 +110,7 @@ describe('Chip Diplomacy interface',()=>{
     vi.mocked(api.create).mockResolvedValue(session(snapshot));
     vi.mocked(api.step).mockRejectedValueOnce(new ApiError('busy',409)).mockResolvedValue({...snapshot,version:2,status:'paused'});
     vi.mocked(api.read).mockResolvedValueOnce(snapshot).mockResolvedValueOnce({...snapshot,version:1,actor:'China'});
-    render(<App/>);fireEvent.click(screen.getByRole('button',{name:'开始模拟'}));
+    render(<App/>);await waitFor(()=>expect((screen.getByRole('button',{name:'开始模拟'}) as HTMLButtonElement).disabled).toBe(false));fireEvent.click(screen.getByRole('button',{name:'开始模拟'}));
     await screen.findByText('另一项行动仍在处理。状态已同步，请稍后重试。');
     fireEvent.click(screen.getByRole('button',{name:'重试当前步骤'}));
     await waitFor(()=>expect(api.step).toHaveBeenCalledTimes(2),{timeout:2000});
@@ -88,7 +122,7 @@ describe('Chip Diplomacy interface',()=>{
     let oldStep:(s:Snapshot)=>void=()=>{},finishPause:(s:Snapshot)=>void=()=>{};
     vi.mocked(api.step).mockImplementationOnce(()=>new Promise(resolve=>{oldStep=resolve})).mockResolvedValue({...snapshot,version:1,status:'paused'});
     vi.mocked(api.control).mockImplementationOnce(()=>new Promise(resolve=>{finishPause=resolve})).mockResolvedValue(snapshot);
-    render(<App/>);fireEvent.click(screen.getByRole('button',{name:'开始模拟'}));
+    render(<App/>);await waitFor(()=>expect((screen.getByRole('button',{name:'开始模拟'}) as HTMLButtonElement).disabled).toBe(false));fireEvent.click(screen.getByRole('button',{name:'开始模拟'}));
     await waitFor(()=>expect(api.step).toHaveBeenCalledTimes(1),{timeout:2000});
     const pause=screen.getByRole('button',{name:'暂停'});fireEvent.click(pause);fireEvent.click(pause);
     expect(api.control).toHaveBeenCalledTimes(1);
@@ -101,9 +135,9 @@ describe('Chip Diplomacy interface',()=>{
     expect(screen.queryByText('本次推演结束')).toBeNull();
   });
   it('keeps decisions in the same panel and opens their evidence in the transcript',async()=>{
-    const completed:Snapshot={...snapshot,version:12,round:3,actor:null,status:'completed',messages:[{id:'m1',round:1,agent:'USA',action:'statement',target:null,content:'可追溯的实际磋商声明',reason:'',is_public:true,proposal_id:null,source:'demo'}],decisions:{USA:{agent:'USA',content:'保留独立审查与后续磋商。',reason:'依据实际记录。',evidence:['m1'],source:'demo'}}};
+    const completed:Snapshot={...snapshot,version:12,round:3,actor:null,status:'completed',messages:[{id:'m1',round:1,agent:'USA',action:'statement',target:null,content:'可追溯的实际磋商声明',reason:'',is_public:true,proposal_id:null,source:'llm'}],decisions:{USA:{agent:'USA',content:'保留独立审查与后续磋商。',reason:'依据实际记录。',evidence:['m1'],source:'llm'}}};
     vi.mocked(api.create).mockResolvedValue(session(completed));
-    render(<App/>);fireEvent.click(screen.getByRole('button',{name:'开始模拟'}));
+    render(<App/>);await waitFor(()=>expect((screen.getByRole('button',{name:'开始模拟'}) as HTMLButtonElement).disabled).toBe(false));fireEvent.click(screen.getByRole('button',{name:'开始模拟'}));
     await screen.findByText('可追溯的实际磋商声明');
     fireEvent.click(screen.getByRole('tab',{name:/最终决策/}));
     expect(screen.getByText('保留独立审查与后续磋商。')).toBeTruthy();
