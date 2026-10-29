@@ -18,9 +18,9 @@ describe('Chip Diplomacy interface',()=>{
     expect((screen.getByRole('button',{name:'开始模拟'}) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText(/实时模型尚未配置/)).toBeTruthy();
     expect(screen.getAllByRole('img',{name:/卡通代表/})).toHaveLength(4);
-    const legend=screen.getByLabelText('地图角色图例');
-    expect(legend.textContent).toContain('美国');expect(legend.textContent).toContain('荷兰');expect(legend.textContent).toContain('中国');
-    expect(legend.textContent).toContain('ASML 总部位于此');
+    expect(screen.queryByRole('img',{name:/地理关系示意图/})).toBeNull();
+    expect(screen.getByRole('tab',{name:/对话记录/}).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tab',{name:/最终决策/})).toBeTruthy();
   });
   it('replaces the controlled role decision with player text and keeps private routing',async()=>{
     const playerState={...snapshot,player:'USA' as const,status:'awaiting_player' as const};
@@ -55,6 +55,7 @@ describe('Chip Diplomacy interface',()=>{
     await screen.findByLabelText('行动类型');
     expect((screen.getByLabelText('行动类型') as HTMLSelectElement).value).toBe('decision');
     expect((screen.getByLabelText('行动类型') as HTMLSelectElement).options).toHaveLength(1);
+    fireEvent.click(screen.getByRole('tab',{name:/最终决策/}));
     expect(screen.getAllByText('等待最后一轮的独立决定。')).toHaveLength(4);
   });
   it('reconciles a lost player response without submitting the same action twice',async()=>{
@@ -99,4 +100,18 @@ describe('Chip Diplomacy interface',()=>{
     expect(vi.mocked(api.step).mock.calls[1][1]).toBe(0);
     expect(screen.queryByText('本次推演结束')).toBeNull();
   });
+  it('keeps decisions in the same panel and opens their evidence in the transcript',async()=>{
+    const completed:Snapshot={...snapshot,version:12,round:3,actor:null,status:'completed',messages:[{id:'m1',round:1,agent:'USA',action:'statement',target:null,content:'可追溯的实际磋商声明',reason:'',is_public:true,proposal_id:null,source:'demo'}],decisions:{USA:{agent:'USA',content:'保留独立审查与后续磋商。',reason:'依据实际记录。',evidence:['m1'],source:'demo'}}};
+    vi.mocked(api.create).mockResolvedValue(session(completed));
+    render(<App/>);fireEvent.click(screen.getByRole('button',{name:'开始模拟'}));
+    await screen.findByText('可追溯的实际磋商声明');
+    fireEvent.click(screen.getByRole('tab',{name:/最终决策/}));
+    expect(screen.getByText('保留独立审查与后续磋商。')).toBeTruthy();
+    expect(screen.queryByRole('tabpanel',{name:/对话记录/})).toBeNull();
+    fireEvent.click(screen.getByText('相关历史依据 · 1 条'));
+    fireEvent.click(screen.getByRole('link',{name:/可追溯的实际磋商声明/}));
+    expect(screen.getByRole('tab',{name:/对话记录/}).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByText('可追溯的实际磋商声明')).toBeTruthy();
+  });
+
 });
