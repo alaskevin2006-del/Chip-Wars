@@ -1,9 +1,15 @@
 import datetime, importlib.util, json, pathlib, tempfile, unittest
+from unittest.mock import patch
 
 spec=importlib.util.spec_from_file_location('release',pathlib.Path(__file__).with_name('diplomacy-release.py'))
 release=importlib.util.module_from_spec(spec);spec.loader.exec_module(release)
 
 class QuotaMigration(unittest.TestCase):
+    def test_legacy_rollback_waits_for_http_not_just_systemd_start(self):
+        with patch.object(release,'run'),patch.object(release,'system'),patch.object(release,'carry_quota'),patch.object(release,'active',return_value=True),patch.object(release,'wait_health') as wait:
+            result=release.restore({'mode':'legacy','legacy_active':True,'legacy_enabled':True})
+            self.assertTrue(result['active']);wait.assert_called_once_with('CHIP WARS')
+
     def test_legacy_to_new_and_back_never_resets_usage(self):
         with tempfile.TemporaryDirectory(prefix='diplomacy-release-test-') as temporary:
             root=pathlib.Path(temporary);old=root/'old.json';new=root/'new.json'

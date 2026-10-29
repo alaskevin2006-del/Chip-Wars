@@ -42,12 +42,12 @@ def carry_quota(source,target,legacy=False):
     a,b=quota(source),quota(target);data={'day':a['day'],'calls':max(a['calls'],b['calls'])}
     if legacy:data['day']=(datetime.date.fromisoformat(data['day'])-datetime.date(1970,1,1)).days
     atomic(target,json.dumps(data))
-def wait_health():
+def wait_health(title='Chip Diplomacy'):
     for _ in range(30):
         try:
             with urllib.request.urlopen(f'http://127.0.0.1:{PORT}/api/health',timeout=2) as r:health=json.load(r)
             with urllib.request.urlopen(f'http://127.0.0.1:{PORT}',timeout=2) as r:html=r.read().decode()
-            if health.get('status')=='ok' and 'Chip Diplomacy' in html:return health
+            if health.get('status')=='ok' and title in html:return health
         except Exception:pass
         time.sleep(1)
     raise RuntimeError('New release health check failed')
@@ -72,7 +72,8 @@ def restore(record):
         day=(datetime.datetime.now(datetime.timezone.utc).date()-datetime.date(1970,1,1)).days
         atomic(LEGACY_LEDGER,json.dumps({'day':day,'calls':10000}))
     if record['legacy_enabled']:system('enable',LEGACY)
-    if record['legacy_active']:system('start',LEGACY)
+    if record['legacy_active']:
+        system('start',LEGACY);wait_health('CHIP WARS')
     return {'restored':'legacy','active':active(LEGACY)}
 
 def install(archive,version,digest):
