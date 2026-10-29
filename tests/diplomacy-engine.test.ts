@@ -9,6 +9,41 @@ const advance=(state:any)=>applyAction(state,decideDemo(getObservation(state,sta
 const seek=(state:any,actor:string)=>{while(state.actor!==actor&&state.status!=='completed')state=advance(state);return state;};
 
 describe('Chip Diplomacy isolated four-role engine',()=>{
+  it('indexes only received evidence in the negotiation brief without inventing another role position',()=>{
+    let state=createSimulation({rounds:3});
+    state=applyAction(state,action('USA',{action:'message',target:'Netherlands',is_public:false,content:'PRIVATE_BRIEF_CANARY'}),'demo');
+    state=applyAction(state,action('China',{action:'proposal',target:'Netherlands',scope:'diplomatic',content:'讨论民用用途证明与资料保护。'}),'demo');
+    const nl=getObservation(state,'Netherlands');
+    expect(nl.negotiationBrief.latestVisibleActions.map((item:any)=>item.message_id)).toEqual(['m1','m2']);
+    expect(nl.negotiationBrief.pendingReceivedProposals.map((item:any)=>item.id)).toEqual(['p2']);
+    expect(nl.negotiationBrief.latestVisibleActions.some((item:any)=>item.agent==='ASML')).toBe(false);
+    const china=getObservation(state,'China');
+    expect(JSON.stringify(china.negotiationBrief)).not.toContain('PRIVATE_BRIEF_CANARY');
+    expect(china.negotiationBrief.pendingSentProposals.map((item:any)=>item.id)).toEqual(['p2']);
+    expect(china.negotiationBrief.latestVisibleActions.map((item:any)=>item.agent)).toEqual(['China']);
+    nl.negotiationBrief.latestVisibleActions[0].content='mutated';
+    expect(state.messages[0].content).toBe('PRIVATE_BRIEF_CANARY');
+    expect(getSnapshot(state)).not.toHaveProperty('negotiationBrief');
+  });
+
+  it('keeps richer scripted examples valid and does not publicize accepted private agreements in final summaries',()=>{
+    let state=createSimulation({rounds:3});
+    state=applyAction(state,action('USA',{action:'proposal',target:'Netherlands',scope:'diplomatic',is_public:false,content:'PRIVATE_FINAL_CANARY'}),'demo');
+    state=advance(state);
+    state=applyAction(state,action('Netherlands',{action:'accept',target:'USA',is_public:false,proposal_id:'p1'}),'demo');
+    while(state.status!=='completed') {
+      const proposed=decideDemo(getObservation(state,state.actor));
+      expect(validateAction(state,proposed).valid).toBe(true);
+      state=applyAction(state,proposed,'demo');
+    }
+    for(const role of ['USA','Netherlands']) {
+      expect(state.decisions[role].content).not.toContain('PRIVATE_FINAL_CANARY');
+      expect(state.decisions[role].content).not.toContain('p1');
+      expect(state.decisions[role].content).toContain('没有本方参与并已被接受的公开提案');
+    }
+    expect(JSON.stringify(getSnapshot(state))).not.toContain('PRIVATE_FINAL_CANARY');
+  });
+
   it('completes every supported round count and every player using valid independently scheduled slots',()=>{
     for(const rounds of [1,2,3,4,5])for(const player of [null,'USA','China','Netherlands','ASML']) {
       let state=createSimulation({rounds,player});

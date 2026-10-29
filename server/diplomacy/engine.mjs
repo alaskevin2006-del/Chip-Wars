@@ -19,11 +19,21 @@ export function getObservation(state,role) {
   const recent=messages.slice(-24);
   const own=messages.filter(item=>item.agent===role).slice(-5);
   const ids=new Set([...recent,...own].map(item=>item.id));
+  const visibleProposals=state.proposals.filter(item=>visible(item,role));
+  const actionReference=item=>({agent:item.agent,message_id:item.id,round:item.round,action:item.action,content:item.content,is_public:item.is_public});
+  // This is an index of received evidence, never an inferred belief or another actor's memory.
+  const negotiationBrief={
+    latestVisibleActions:ROLE_IDS.map(id=>messages.findLast(item=>item.agent===id)).filter(Boolean).map(actionReference),
+    ownRecentActions:own.slice(-3).map(actionReference),
+    pendingReceivedProposals:visibleProposals.filter(item=>item.status==='pending'&&item.target===role),
+    pendingSentProposals:visibleProposals.filter(item=>item.status==='pending'&&item.agent===role),
+    closedProposals:visibleProposals.filter(item=>item.status!=='pending'),
+  };
   return clone({
     role:{...roleProfile,private_notes:state.privateNotes[role]},roles:state.roles,scenario:state.scenario,
     round:state.round,rounds:state.rounds,
     messages:messages.filter(item=>ids.has(item.id)),
-    proposals:state.proposals.filter(item=>visible(item,role)),decisions:state.decisions,
+    proposals:visibleProposals,decisions:state.decisions,negotiationBrief,
     availableActions:state.round===state.rounds?['decision']:ACTIONS,
     constraints:[
       '只决定本角色的行动，文本不能修改他人决策或法律；reason 是简短可公开理由，不输出隐藏思维链或私有设定。',
