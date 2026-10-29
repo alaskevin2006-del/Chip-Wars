@@ -1,15 +1,32 @@
 {
-  "name": "chip-wars",
+  "name": "chip-diplomacy",
   "private": true,
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
+    "dev": "vite --host 127.0.0.1 --port 3000 --strictPort",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "build": "vite build",
-    "start": "node server/index.mjs"
+    "start": "node --env-file-if-exists=.env server/diplomacy-index.mjs",
+    "dev:server": "node --env-file-if-exists=.env server/diplomacy-index.mjs",
+    "dev:legacy": "vite --host 127.0.0.1 --port 3000 --strictPort --open /legacy.html",
+    "start:legacy": "node --env-file-if-exists=.env server/index.mjs"
   },
-  "dependencies": { "react": "^19.2.0", "react-dom": "^19.2.0", "lucide-react": "^0.468.0" },
-  "devDependencies": { "@types/node": "^22.19.0", "@types/react": "^19.2.0", "@types/react-dom": "^19.2.0", "@vitejs/plugin-react": "^5.0.4", "typescript": "~5.9.3", "vite": "^7.1.7", "vitest": "^3.2.4", "jsdom": "^26.1.0", "@testing-library/react": "^16.3.0" }
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "lucide-react": "^0.468.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.0.4",
+    "typescript": "~5.9.3",
+    "vite": "^7.1.7",
+    "vitest": "^3.2.4",
+    "jsdom": "^26.1.0",
+    "@testing-library/react": "^16.3.0"
+  }
 }

@@ -446,5 +446,13 @@
   {
     "path": "backend/scripts/run_parallel_simulation.py.orig_lkx_20261020",
     "sha256": "53e637c56959cbd03a819d341707468ea47312b37ef20de85332eaacd5a92c54"
+  },
+  {
+    "path": "frontend/src/assets/logo/MiroFish_logo_compressed.jpeg",
+    "sha256": "f2289e76f26f6258e93d08ba10d1cb3ce72dd8663edc7e0efbe0a29ae2128333"
+  },
+  {
+    "path": "frontend/src/assets/logo/MiroFish_logo_left.jpeg",
+    "sha256": "cd3b5a96932368265e66e456de0bb68fc56cdca605bfa148c10e913af33fea6b"
   }
 ]
