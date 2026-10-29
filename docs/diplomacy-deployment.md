@@ -1,6 +1,6 @@
 # Chip Diplomacy runtime
 
-New code is separate from legacy Chip-Wars. Do NOT use the old ops/deploy.sh archive format or chip-wars service for this application without a new reviewed deployment plan. No remote service was replaced during this work; legacy deployment records describe only Chip-Wars.
+New code is separate from legacy Chip-Wars. Do NOT use the old ops/deploy.sh for this application. New deployment uses ops/diplomacy-release.py and a separate chip-diplomacy.service, application directory, container and persistent quota ledger. Historical docs/progress.md describes only Chip-Wars.
 
 Local verified entry: http://127.0.0.1:3000 with Vite forwarding /api to http://127.0.0.1:5001. These are the inspected MiroFish configured ports; neither was listening before this task. No old process was stopped to claim them. Only this task's new backend was restarted during testing.
 
@@ -9,3 +9,13 @@ Install Node22.16+/24, npm ci. Configure private .env from template. npm start l
 For a future remote deployment, use a new isolated directory/service and explicitly reviewed target port, preserve unrelated services/default sites, set actual PUBLIC_ORIGIN, HOST and PORT, and protect .env/ledger directory. Node server needs no npm runtime dependencies after build, but must include all server/diplomacy/*.mjs files and server/diplomacy-index.mjs. Serve behind HTTPS for public access. Current session bearer tokens are capability tokens, not account authentication; do not publish a shared provider without additional access protection and appropriate provider account limits. Keep persistent quota ledger writable and private; active simulation memory is intentionally ephemeral.
 
 Rollback locally: stop only these two development processes; start original MiroFish from its untouched directory, or create a fresh Chip-Wars worktree at backup/chip-wars-before-diplomacy-20261029. See archive/README.md. Credentials are excluded from source archives and must be configured separately.
+
+## Server cutover procedure
+
+Verified release package contains only dist/, new server modules, new deployment/probe scripts and VERSION. No .env, source archives, node_modules, private connection information or chat logs. Supply its exact Git SHA and SHA256 digest. Transfer package and the deployment script over authenticated SSH/SFTP. Run `python3 /tmp/diplomacy-release.py install /tmp/chip-diplomacy-<sha>.tar.gz <sha> <sha256>` as the existing project deployment user.
+
+The script checks service/container ownership, archive paths and content digest, uses the existing official Node24.21.0 image pinned by its actual image ID (no pull/upgrade), and tests the package in a read-only network-disabled temporary container. Only after that succeeds does it stop the old Chip-Wars service and start the new isolated service on the same4187 port. No other application, proxy, firewall, default site or port is modified. Old source, releases, unit and environment stay in place; only the old project's autostart is disabled to avoid port conflicts. Repeating an already-active version preserves rollback metadata and quota.
+
+The new private environment is derived server-side from the old project environment (credentials are never printed). Scope: own .config/chip-diplomacy child directory700, environment600, own runtime directory700. Timeout45seconds/output2200tokens; existing daily allowance retained. Migration converts the old integer-day ledger to the new ISO-date format and keeps the maximum current-day usage; rollback converts back without resetting allowance. Corrupt or uncertain quota is closed, never reset to a fresh allowance.
+
+Rollback: `python3 ~/chip-diplomacy/current/ops/diplomacy-release.py rollback`. First migration restores old Chip-Wars service/autostart; later updates restore the previous Diplomacy release. Failed health check attempts the same project-only restoration automatically. Validate public homepage/assets/API, three demo rounds, actual model calls, previous-version restoration, and unchanged unrelated container start/restart counts. Source-side checks: standard122game/API/UI tests plus `python3 -m unittest discover -s ops -p test_diplomacy_release.py` for quota migration and file-preservation guards. A successful local probe does not establish public reachability.
