@@ -89,8 +89,8 @@ export default function App(){
   const activeStatus=waiting?'awaiting_player':snapshot?.status??'ready';
   useEffect(()=>{const container=feed.current;if(container&&followFeed.current)container.scrollTop=container.scrollHeight;},[snapshot?.version,view,filter]);
   function showEvidence(id:string){
-    setFilter('all');setView('dialogue');
-    setTimeout(()=>{const container=feed.current;const message=document.getElementById(`message-${id}`);if(container&&message)container.scrollTop=message.offsetTop-container.offsetTop;},0);
+    followFeed.current=false;setFilter('all');setView('dialogue');
+    setTimeout(()=>{const container=feed.current;const message=document.getElementById(`message-${id}`);if(container&&message)container.scrollTop+=message.getBoundingClientRect().top-container.getBoundingClientRect().top-8;},0);
   }
   return <div className="cd-app cd-compact"><header className="cd-header">
     <a className="cd-brand" href="#"><span className="cd-brand-icon"><Globe2 size={22}/></span><span>CHIP DIPLOMACY<small>中美半导体外交博弈模拟</small></span></a>
