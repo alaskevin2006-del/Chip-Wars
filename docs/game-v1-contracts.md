@@ -1,3 +1,4 @@
+> Historical V1.0 contract. Current application follows docs/game-v16-contracts.md.
 # Four-round V1 integration contract
 
 Sole game rules: docs/game-rules-v1.md, adopted by user2026-10-30. Supersedes old text-only and V3 for new entry. Shared interface src/game-v1/types.ts. Fourroles US,CN,NL,AS fixed totalRounds4. Numeric game assumptions ONLY A/B/H/R and specified credit/fulfilledDeals. No new effects or fixed economic forecasts. Production uses real DeepSeek, no demo endpoint/fallback. Retain earlier code as legacy.
@@ -43,3 +44,4 @@ POST .../:id/secretary {} -> {advice:SecretaryAdvice}; only player's projected o
 Invalid player inputs422; stale or conflicting version409 -> UI GET authoritative state, preserve unsent draft. No state mutation by client, no role selection in subsequent requests. Server output notices are generic safe errors, never provider raw text/key or private goal from a competitor. Public phases and current status may be added to snapshot; types changes coordinator only.
 
 UI export src/game-v1/App.tsx; coordinator mounts it from src/diplomacy-main.tsx. Single compact page: fourmetrics explanations, owngoal, public credit/possibletypes, 4round stage progress, chat max2/100chars,AI polish optional, proposal form participant nonPASS commitments, signing controls, actioncards selectable independent of promises, reveal only after settlement, clear report/history/win requirements. Secretary on demand shows guesses as guesses. No mode selector/demo path. Desktop main info same page; mobile readable without overflow. Explain selected goal is hypothetical private game objective. Opponent private goals hidden until final. Preserve earlier UI files unmodified.
+

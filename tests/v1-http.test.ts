@@ -3,7 +3,7 @@ import type {Server} from 'node:http';
 import {mkdtemp,writeFile,mkdir,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import {createDiplomacyServer} from '../server/diplomacy-index.mjs';
+import {createDiplomacyServer} from '../server/v1-index.mjs';
 const servers:Server[]=[];
 afterEach(async()=>{await Promise.all(servers.splice(0).map(s=>new Promise<void>(resolve=>{s.closeAllConnections();s.close(()=>resolve());})));});
 const sleep=(ms:number)=>new Promise(r=>setTimeout(r,ms));
@@ -81,3 +81,4 @@ describe('V1 authoritative scheduling and privacy',()=>{
   const secretary=seen.find(o=>o.task==='secretary');expect(secretary.ownGoal.role).toBe('US');expect(secretary.goals).toBeUndefined();expect(JSON.stringify(secretary.messages)).not.toContain('CN_PRIVATE_CANARY');
  });
 });
+
