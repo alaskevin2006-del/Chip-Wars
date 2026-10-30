@@ -9,7 +9,7 @@ import {createProvider} from '../server/diplomacy/provider.mjs';
 const servers:Server[]=[];
 afterEach(async()=>{await Promise.all(servers.splice(0).map(server=>new Promise<void>(resolve=>{server.closeAllConnections();server.close(()=>resolve());})));});
 async function setup(options:Parameters<typeof createDiplomacyServer>[0]={}) {
-  const server=createDiplomacyServer(options);servers.push(server);
+  const server=createDiplomacyServer({...options,env:{DIPLOMACY_ALLOW_DEMO:'true',...options?.env}});servers.push(server);
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   const address=server.address();if(!address||typeof address==='string')throw Error('no address');
   const origin=`http://127.0.0.1:${address.port}`;
@@ -19,6 +19,12 @@ async function setup(options:Parameters<typeof createDiplomacyServer>[0]={}) {
   return {request,origin};
 }
 describe('authoritative diplomacy HTTP sessions',()=>{
+  it('rejects demo sessions by default and cannot replace unavailable live calls with scripts',async()=>{
+    const {request}=await setup({env:{DIPLOMACY_ALLOW_DEMO:'false'}});
+    const denied=await request('/api/diplomacy/sessions','POST',{mode:'demo',rounds:3,player:null});
+    expect(denied.status).toBe(403);expect(denied.data.error).toContain('真实推演');
+    expect((await request('/api/diplomacy/sessions','POST',{mode:'live',rounds:3,player:null})).status).toBe(503);
+  });
   it('completes three demo rounds with four traceable decisions and rejects stolen sessions',async()=>{
     const {request}=await setup({env:{}});
     const created=await request('/api/diplomacy/sessions','POST',{mode:'demo',rounds:3,player:null});expect(created.status).toBe(201);

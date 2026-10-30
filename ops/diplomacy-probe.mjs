@@ -1,5 +1,5 @@
 import {createDiplomacyServer} from '../server/diplomacy-index.mjs';
-const server=createDiplomacyServer({env:{}});
+const server=createDiplomacyServer({env:{DIPLOMACY_ALLOW_DEMO:'true'}});
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const origin=`http://127.0.0.1:${server.address().port}`;
 try {

@@ -129,7 +129,7 @@ WantedBy=multi-user.target
         if active(UNIT):system('stop',UNIT)
         if active(LEGACY):system('stop',LEGACY)
         carry_quota(LEGACY_LEDGER,LEDGER)
-        values.update(HOST='0.0.0.0',PORT=str(PORT),LLM_TIMEOUT_MS='45000',LLM_MAX_TOKENS='2200',LLM_LEDGER_PATH='/state/diplomacy-usage.json')
+        values.update(DIPLOMACY_ALLOW_DEMO='false',HOST='0.0.0.0',PORT=str(PORT),LLM_TIMEOUT_MS='45000',LLM_MAX_TOKENS='2200',LLM_LEDGER_PATH='/state/diplomacy-usage.json')
         values.setdefault('LLM_DAILY_LIMIT','60')
         atomic(ENV,'\n'.join(k+'='+v for k,v in values.items())+'\n')
         temp=ROOT/'unit.pending';atomic(temp,unit)
