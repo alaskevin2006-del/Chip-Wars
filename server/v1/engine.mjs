@@ -148,7 +148,7 @@ function outcome(start,a,backlash,caught) {
  const hundredths=Object.fromEntries(METRICS.map(k=>[k,0])),effects=[];
  const add=(rule,description,delta,privateAS=false)=>{effects.push({rule,description,delta,privateAS});for(const k of METRICS)hundredths[k]+=Math.round((delta[k]||0)*100);};
  const leverage=1+start.A/5,baseCost=start.S>=3?-.5:-1;
- if(a.US==='U1')add('U1','美国收紧管制；同盟杠杆按回合开始协调度计算，研发缓冲及已有材料压力计入成本。',{T:leverage,E:baseCost-(start.P>=1?.5:0)});
+ if(a.US==='U1')add('U1',`美国收紧管制：轮初协调度${start.A}，技术难度增加${leverage}；轮初自主能力${start.S}，基础商业成本${-baseCost}；轮初国内压力${start.P}，${start.P>=1?'另增加0.5商业成本':'未增加材料压力成本'}。`,{T:leverage,E:baseCost-(start.P>=1?.5:0)});
  if(a.US==='U2')add('U2','美国有限放宽，商业预期缓和降低国内压力；不表示中国解除材料限制。',{T:-1,E:1,P:-1});
  if(a.US==='U3') {add('U3','美国争取协调，付出商业成本。',{E:-.4});if(a.NL==='N3')add('U3+N3','美荷协调联动一次。',{A:2});else add('U3_RANDOM',backlash?'美方协调未获配合，随机反噬。':'美方协调未获配合，本轮没有反噬。',backlash?{A:-1}:{});}
  if(a.US==='U4')add('U4','美国加强合规执法，查获概率额外提高30个百分点。',{E:-.2});
@@ -225,9 +225,10 @@ function projectDeal(deal,viewer) {
 function projectReport(report,viewer) {
  const canSeeAS=viewer==='AS'||report.caught;
  const effects=report.effects.filter(e=>!e.privateAS||canSeeAS).map(({rule,description,delta})=>({rule,description,delta}));
- if(!canSeeAS)effects.push({rule:'UNDISCLOSED',description:'ASML本轮行动未公开；可根据公开指标自行推断。',delta:{}});
+ if(!canSeeAS)effects.push({rule:'UNDISCLOSED',description:'未公开方的合计影响（不披露具体行动）；已计入结算。',delta:Object.fromEntries(METRICS.map(k=>[k,Math.round((report.delta[k]-effects.reduce((n,e)=>n+(e.delta[k]||0),0))*100)/100]))});
  const sources={...report.sources};if(!canSeeAS)delete sources.AS;
- return {round:report.round,roundStart:report.roundStart,state:report.state,delta:report.delta,actions:{...report.actions,AS:canSeeAS?report.actions.AS:'hidden'},sources,effects,deals:report.deals.map(d=>projectDeal(d,viewer)),credit:report.credit,fulfilledDeals:report.fulfilledDeals};
+ const adjustment=Object.fromEntries(METRICS.map(k=>[k,Math.round((report.state[k]-report.roundStart[k]-report.delta[k])*100)/100]));
+ return {round:report.round,roundStart:report.roundStart,state:report.state,delta:report.delta,adjustment,actions:{...report.actions,AS:canSeeAS?report.actions.AS:'hidden'},sources,effects,deals:report.deals.map(d=>projectDeal(d,viewer)),credit:report.credit,fulfilledDeals:report.fulfilledDeals};
 }
 export function getSnapshot(game,viewer) {
  validRole(viewer);const ownDeal=signed(game,viewer);
@@ -235,7 +236,8 @@ export function getSnapshot(game,viewer) {
   roles:ROLE_IDS.map(id=>({id,name:ROLE_INFO[id][0],description:ROLE_INFO[id][1],credit:game.credit[id],fulfilledDeals:game.fulfilledDeals[id],possibleGoals:GOAL_CATALOGUE[id].map(({id:goalId,label})=>({id:goalId,label}))})),
   goalCatalogue:GOAL_CATALOGUE,ownGoal:game.goals[viewer],legalActions:legalActions(game,viewer),messages:game.messages.filter(m=>m.to===null||m.from===viewer||m.to===viewer),deals:game.deals.map(d=>projectDeal(d,viewer)),
   readyRoles:game.readyRoles,submittedRoles:ROLE_IDS.filter(r=>has(game.actions,r)),messageCount:game.messages.filter(m=>m.round===game.round&&m.from===viewer).length,proposalsMade:currentDeals(game).filter(d=>d.proposer===viewer).length,
-  reportHistory:game.reportHistory.map(r=>projectReport(r,viewer)),pendingResearch:game.pendingResearch,researchUses:game.researchUses,monitoring:game.monitoring,pendingPenalties:game.pendingPenalties};
+  reportHistory:game.reportHistory.map(r=>projectReport(r,viewer)),pendingResearch:game.pendingResearch,researchUses:game.researchUses,monitoring:game.monitoring,pendingPenalties:game.pendingPenalties,
+  actionPreviews:legalActions(game,viewer).map(card=>previewAction(game,viewer,card.id))};
  if(viewer==='AS')snapshot.ownGreyRisk=Math.min(1,.2+game.roundStart.A*.1+(game.monitoring?.2:0));
  if(has(game.actions,viewer))snapshot.ownAction=game.actions[viewer];if(ownDeal)snapshot.signedDealId=ownDeal.id;
  if(game.phase==='finished') {
@@ -280,4 +282,65 @@ export function chooseFallbackAction(game,role) {
   if(!best||gap<best.gap-1e-9||(Math.abs(gap-best.gap)<1e-9&&interests>best.interests+1e-9))best={id:action.id,gap,interests};
  }
  return best.id;
+}
+
+const PREVIEW_SUMMARIES={U1:'提高技术限制，但会损失整体商业收益。',U2:'缓和技术限制并改善商业收益、降低美国压力。',U3:'争取荷兰配合；成功提升协调，未获配合可能适得其反。',U4:'付出小额商业成本，提高本轮查获灰色交付的可能。',C1:'牺牲部分当前收益，换取下一回合自主能力。',C2:'通过材料供应向美国施压；不会自动降低技术难度。',C3:'降低美荷协调、改善商业合作；荷兰许可可增加收益。',C4:'放松材料限制，缓解美国压力并改善商业收益。',N1:'提高技术限制和美荷协调，但会损失商业收益。',N2:'放宽许可；ASML配合交付才能取得订单收益。',N3:'配合美国争取协调；美国不配合时没有独立效果。',S1:'需要荷兰许可才能交付，缺少许可会损失准备成本。',S2:'通过其他市场增加商业收益，但会提高中国获取难度。',S4:'高收益、高风险；被查获会损失收益、信用并带来技术处罚。',PASS:'你不主动改变指标；其他角色仍可能改变局势。'};
+
+// Pure counterfactuals: never inspect selected actions, private opponent goals or seeded rolls.
+export function previewAction(game,role,actionId) {
+ validRole(role);if(!isLegal(game,role,actionId))fail('该行动当前不可选，无法生成预览。');
+ const base={...record('PASS'),[role]:actionId,finalRound:game.round===4};
+ const branches=[];
+ const add=(label,choices={},backlash=false,caught=false,probability)=>{
+  const a={...base,...choices},result=outcome(game.roundStart,a,backlash,caught),delayed=[];
+  if(a.CN==='C1'&&game.round<4)delayed.push({metric:'S',amount:1,when:'下一回合开始'});
+  if(a.AS==='S4'&&caught&&game.round<4)delayed.push({metric:'T',amount:1,when:'下一回合开始'});
+  const branch={label,state:result.state,delta:result.delta,delayed};
+  if(probability!==undefined)branch.probability=probability;
+  const promise=signed(game,role)?.commitments[role];
+  const rawCredit=(promise?(a[role]===promise?1:-1):0)+(role==='AS'&&a.AS==='S4'&&caught?-1:0);
+  branch.creditDelta=clamp(game.credit[role]+rawCredit,2)-game.credit[role];
+  branches.push(branch);
+ };
+ if(actionId==='U3') {add('荷兰同时配合协调',{NL:'N3'});add('荷兰未配合：协调不变',{},false,false,.7);add('荷兰未配合：发生反噬',{},true,false,.3);}
+ else if(actionId==='U4') {add('ASML未选择灰色交付');const a={...base,AS:'S4'},p=chance(game.roundStart,a,false,game.monitoring);add('假设ASML灰色交付：查获',{AS:'S4'},false,true,p);add('假设ASML灰色交付：未查获',{AS:'S4'},false,false,1-p);}
+ else if(actionId==='N3') {add('美国同时争取荷兰协调',{US:'U3'});add('美国未配合：无独立效果');}
+ else if(actionId==='N2') {add('ASML同时执行合规订单',{AS:'S1'});add('ASML没有执行合规订单');}
+ else if(actionId==='S1') {if(isLegal(game,'NL','N2'))add('荷兰同时批准有限许可',{NL:'N2'});add('荷兰没有批准有限许可');}
+ else if(actionId==='C3') {add('荷兰没有批准有限许可');if(isLegal(game,'NL','N2'))add('荷兰同时批准有限许可',{NL:'N2'});}
+ else if(actionId==='S4') {const p=chance(game.roundStart,base,false,game.monitoring);add('查获（基础风险估计）',{},false,true,p);add('未查获（基础风险估计）',{},false,false,1-p);}
+ else add('仅本方行动，其余保持现状');
+ return copy({actionId,summary:PREVIEW_SUMMARIES[actionId],assumptions:['按本轮开始的公开状态估算；其他角色真实选择尚不可知。','除分支注明的假设行动外，其余角色均假设保持现状；合作分支包括双方效果。','预览不保证最终结果，实际结算还会合计所有角色行动并统一取位、截断。'],branches,...(['S4','U4'].includes(actionId)?{riskIsEstimate:true}:{})});
+}
+
+function signingScore(game,role,a) {
+ const goal=game.goals[role],start=game.roundStart;let gap=0,interest=0;
+ const backlashes=a.US==='U3'&&a.NL!=='N3'?[[false,.7],[true,.3]]:[[false,1]];
+ for(const [backlash,weight] of backlashes) {
+  const probability=chance(start,a,backlash,game.monitoring),caughtCases=a.AS==='S4'?[[true,probability],[false,1-probability]]:[[false,1]];
+  for(const [caught,w] of caughtCases) {
+   const state=outcome(start,{...a,finalRound:game.round===4},backlash,caught).state;
+   if(a.CN==='C1'&&game.round<4)state.S=normalize('S',state.S+1);
+   const values={...state,effectiveT:effectiveT(state)};
+   gap+=goal.conditions.reduce((n,c)=>n+Math.max(0,c.operator==='gte'?c.value-values[c.metric]:values[c.metric]-c.value),0)*weight*w;
+   const ownInterest=role==='US'?state.T+state.A+state.E-state.P*2:role==='CN'?state.S+state.E-state.T:role==='NL'?state.E+state.A:state.E;
+   interest+=ownInterest*weight*w;
+  }
+ }
+ return {gap,interest};
+}
+
+export function chooseFallbackResponses(game,role) {
+ validRole(role);if(game.phase!=='signing'||game.readyRoles.includes(role))return [];
+ const baseline=signingScore(game,role,{...record('PASS'),[role]:chooseFallbackAction(game,role)});
+ const pending=currentDeals(game).filter(d=>d.status==='pending'&&has(d.commitments,role)&&!d.accepted.includes(role));
+ let selected=!!signed(game,role);const responses=[];
+ // Array insertion order is the creation order; ID provides a stable tie-break.
+ for(const d of pending) {
+  const possible=!selected&&d.participants.every(r=>!signed(game,r)&&isLegal(game,r,d.commitments[r])&&!['PASS','S4'].includes(d.commitments[r]));
+  const score=possible?signingScore(game,role,{...record('PASS'),...d.commitments}):null;
+  const accept=!!score&&(score.gap<baseline.gap-1e-9||(Math.abs(score.gap-baseline.gap)<1e-9&&score.interest>=baseline.interest-1e-9));
+  responses.push({dealId:d.id,accept});if(accept)selected=true;
+ }
+ return responses;
 }
