@@ -29,6 +29,20 @@ async function start() {render(<App/>);await waitFor(()=>expect((screen.getByTex
 const calls=(suffix:string)=>fetcher.mock.calls.filter(([url])=>(url as string).endsWith(suffix));
 
 describe('V1.6 real-service interface',()=>{
+  it('brings a selected preview into view and returns to cards without clearing the choice or submitting',async()=>{
+    const descriptor=Object.getOwnPropertyDescriptor(HTMLElement.prototype,'scrollIntoView'),scroll=vi.fn();
+    Object.defineProperty(HTMLElement.prototype,'scrollIntoView',{configurable:true,value:scroll});
+    try{
+      live={...live,phase:'actions',actionPreviews:[{actionId:'U1',summary:'基础管制情景',assumptions:['前提甲：其他方保持现状','前提乙：不是对方真实选择','前提丙：最终结果统一结算'],branches:[{label:'本方行动情景',state:{T:3.4,A:2,E:2,S:1,P:0},delta:{T:1.4,A:0,E:-1,S:0,P:0},delayed:[]}]}]};
+      render(<App/>);await waitFor(()=>expect((screen.getByText('开始四回合博弈') as HTMLButtonElement).disabled).toBe(false));fireEvent.click(screen.getByText('开始四回合博弈'));
+      const card=await screen.findByRole('button',{name:/收紧技术管制/});await waitFor(()=>expect((card as HTMLButtonElement).disabled).toBe(false));fireEvent.click(card);
+      const previewHeading=screen.getByRole('heading',{name:'本轮预计 · 条件化后果'});
+      expect(scroll).toHaveBeenCalledWith({block:'start',behavior:'auto'});expect(scroll.mock.contexts.at(-1)).toBe(previewHeading);expect(document.activeElement).toBe(previewHeading);
+      expect(screen.getByText(/除分支明确列出的合作方外/)).toBeTruthy();const premises=screen.getByText('展开完整情景前提').closest('details')!;expect(premises.open).toBe(false);
+      fireEvent.click(screen.getByText('展开完整情景前提'));expect(premises.open).toBe(true);expect(screen.getByText('前提乙：不是对方真实选择')).toBeTruthy();expect(screen.getByText('本方行动情景')).toBeTruthy();
+      fireEvent.click(screen.getByRole('button',{name:'换一个行动'}));expect(scroll.mock.contexts.at(-1)).toBe(screen.getByRole('heading',{name:'可选行动'}));expect(card.getAttribute('aria-pressed')).toBe('true');fireEvent.click(card);expect(scroll.mock.contexts.at(-1)).toBe(previewHeading);expect(calls('/action')).toHaveLength(0);
+    }finally{if(descriptor)Object.defineProperty(HTMLElement.prototype,'scrollIntoView',descriptor);else delete (HTMLElement.prototype as any).scrollIntoView;}
+  });
   it('retries the same secret action once after a benign NPC version race',async()=>{
     live={...live,phase:'actions'};const original=fetcher.getMockImplementation()!;let attempts=0;
     fetcher.mockImplementation(async(url:string,options?:RequestInit)=>{
