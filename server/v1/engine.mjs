@@ -146,9 +146,9 @@ const roundSeed = (seed,round) => mix(seed^Math.imul(round,0x9e3779b9));
 const roll = (seed,lane) => mix(seed^lane)/4294967296;
 function outcome(start,a,backlash,caught) {
  const hundredths=Object.fromEntries(METRICS.map(k=>[k,0])),effects=[];
- const add=(rule,description,delta,privateAS=false)=>{effects.push({rule,description,delta,privateAS});for(const k of METRICS)hundredths[k]+=Math.round((delta[k]||0)*100);};
+ const add=(rule,description,delta,privateAS=false)=>{const exact=Object.fromEntries(Object.entries(delta).map(([k,v])=>[k,Math.round(v*100)/100]));effects.push({rule,description,delta:exact,privateAS});for(const k of METRICS)hundredths[k]+=Math.round((exact[k]||0)*100);};
  const leverage=1+start.A/5,baseCost=start.S>=3?-.5:-1;
- if(a.US==='U1')add('U1',`美国收紧管制：轮初协调度${start.A}，技术难度增加${leverage}；轮初自主能力${start.S}，基础商业成本${-baseCost}；轮初国内压力${start.P}，${start.P>=1?'另增加0.5商业成本':'未增加材料压力成本'}。`,{T:leverage,E:baseCost-(start.P>=1?.5:0)});
+ if(a.US==='U1')add('U1',`美国收紧管制：轮初协调度${start.A}，技术难度增加${Number(leverage.toFixed(2))}；轮初自主能力${start.S}，基础商业成本${-baseCost}；轮初国内压力${start.P}，${start.P>=1?'另增加0.5商业成本':'未增加材料压力成本'}。`,{T:leverage,E:baseCost-(start.P>=1?.5:0)});
  if(a.US==='U2')add('U2','美国有限放宽，商业预期缓和降低国内压力；不表示中国解除材料限制。',{T:-1,E:1,P:-1});
  if(a.US==='U3') {add('U3','美国争取协调，付出商业成本。',{E:-.4});if(a.NL==='N3')add('U3+N3','美荷协调联动一次。',{A:2});else add('U3_RANDOM',backlash?'美方协调未获配合，随机反噬。':'美方协调未获配合，本轮没有反噬。',backlash?{A:-1}:{});}
  if(a.US==='U4')add('U4','美国加强合规执法，查获概率额外提高30个百分点。',{E:-.2});

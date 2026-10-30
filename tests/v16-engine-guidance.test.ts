@@ -7,6 +7,9 @@ const ready=(s:any)=>roles.reduce((s,r)=>e.ready(s,r),s);
 const run=(s:any,a:any)=>{while(['negotiation','signing'].includes(s.phase))s=ready(s);return roles.reduce((s,r)=>e.submitAction(s,r,a[r]||'PASS'),s);};
 const start=(state:any)=>{const s=initial();return {...s,state:{...s.state,...state},roundStart:{...s.roundStart,...state}};};
 describe('guided previews and exact public reconciliation',()=>{
+ it('describes decimal leverage without binary floating tails',()=>{
+  const s=run(start({A:3.2}),{US:'U1'}),effect=e.getSnapshot(s,'US').reportHistory[0].effects.find((x:any)=>x.rule==='U1');expect(effect.delta.T).toBe(1.64);expect(effect.description).toContain('技术难度增加1.64；');
+ });
  it.each([[0,1,-1],[1,1,-1.5],[0,3,-.5],[1,3,-1]])('U1 costs use roundStart P%s/S%s in BOTH effects and totals', (P,S,cost)=>{
   const s=run(start({P,S}),{US:'U1',CN:'C2'}),r=e.getSnapshot(s,'US').reportHistory[0],u=r.effects.find((x:any)=>x.rule==='U1');
   expect(u.delta.E).toBe(cost);expect(s.state.E).toBe(3+cost-.5);expect(u.description).toContain(`轮初国内压力${P}`);expect(u.description).toContain(P===0?'未增加材料压力成本':'另增加0.5商业成本');
