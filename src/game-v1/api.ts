@@ -20,6 +20,6 @@ export const api = {
   read: (auth: Auth) => request<Snapshot>(path(auth),'GET',undefined,auth),
   remove: (auth: Auth) => request<{deleted:true}>(path(auth),'DELETE',undefined,auth),
   write: (auth: Auth, operation: 'message'|'proposal'|'respond'|'ready'|'action'|'next', expectedVersion: number, payload: {content?:string;target?:Role|null;commitments?:Commitments;text?:string;dealId?:string;accept?:boolean;actionId?:ActionId} = {}) => request<Snapshot>(path(auth,`/${operation}`),'POST',{expectedVersion,...payload},auth),
-  polish: (auth: Auth, text: string) => request<{candidate:string}>(path(auth,'/polish'),'POST',{text},auth),
+  polish: (auth: Auth, text: string, tone: 'neutral'|'firm'|'friendly' = 'neutral') => request<{candidate:string}>(path(auth,'/polish'),'POST',{text,tone},auth),
   secretary: (auth: Auth) => request<{advice:SecretaryAdvice}>(path(auth,'/secretary'),'POST',{},auth),
 };
