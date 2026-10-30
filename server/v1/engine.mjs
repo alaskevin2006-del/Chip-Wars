@@ -225,7 +225,7 @@ function projectDeal(deal,viewer) {
 function projectReport(report,viewer) {
  const canSeeAS=viewer==='AS'||report.caught;
  const effects=report.effects.filter(e=>!e.privateAS||canSeeAS).map(({rule,description,delta})=>({rule,description,delta}));
- if(!canSeeAS&&report.effects.some(e=>e.privateAS))effects.push({rule:'UNDISCLOSED',description:'部分指标变化来自未公开行动；可根据公开指标自行推断。',delta:{}});
+ if(!canSeeAS)effects.push({rule:'UNDISCLOSED',description:'ASML本轮行动未公开；可根据公开指标自行推断。',delta:{}});
  const sources={...report.sources};if(!canSeeAS)delete sources.AS;
  return {round:report.round,roundStart:report.roundStart,state:report.state,delta:report.delta,actions:{...report.actions,AS:canSeeAS?report.actions.AS:'hidden'},sources,effects,deals:report.deals.map(d=>projectDeal(d,viewer)),credit:report.credit,fulfilledDeals:report.fulfilledDeals};
 }
