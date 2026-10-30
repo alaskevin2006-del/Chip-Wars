@@ -8,3 +8,10 @@ coverage/
 *.tsbuildinfo
 artifacts/
 .tmp/
+
+# Design-document build cache and visual QA artifacts
+__pycache__/
+*.py[cod]
+output/~$*
+output/_qa*/
+output/qa/
