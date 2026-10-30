@@ -64,7 +64,7 @@ describe('V1.6 exact effects and stable random settlement',()=>{
 });
 describe('V1.6 private views, atomic agreements, victory and fallback',()=>{
  it.each(['S1','S2','PASS'])('hides AS %s in every non-owner report, source and effect',a=>{
-  const s=run(initial(),{AS:a,NL:a==='S1'?'N2':'PASS'}),p=e.getSnapshot(s,'US'),r=p.reportHistory[0];expect(r.actions.AS).toBe('hidden');expect(r.sources.AS).toBeUndefined();expect(r.effects.some((x:any)=>x.rule===a||x.rule==='N2+S1')).toBe(false);expect(e.getSnapshot(s,'AS').reportHistory[0].actions.AS).toBe(a);expect(p.randomRecords).toBeUndefined();expect(p.seed).toBeUndefined();
+  const s=run(initial(),{AS:a,NL:a==='S1'?'N2':'PASS'}),p=e.getSnapshot(s,'US'),r=p.reportHistory[0];expect(r.actions.AS).toBe('hidden');expect(r.sources.AS).toBeUndefined();expect(r.effects.some((x:any)=>x.rule===a||x.rule==='N2+S1')).toBe(false);expect(r.effects.filter((x:any)=>x.rule==='UNDISCLOSED')).toHaveLength(1);expect(e.getSnapshot(s,'AS').reportHistory[0].actions.AS).toBe(a);expect(p.randomRecords).toBeUndefined();expect(p.seed).toBeUndefined();
  });
  it('uncaught grey delivery stays hidden; caught delivery is public without revealing seeds',()=>{
   const hidden=e.getSnapshot(find(false),'NL');expect(hidden.reportHistory[0].actions.AS).toBe('hidden');expect(JSON.stringify(hidden.reportHistory)).not.toContain('S4');
