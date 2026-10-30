@@ -12,6 +12,20 @@ const count = (value:string) => Array.from(value).length;
 const messageOf = (error:unknown) => error instanceof Error ? error.message : '请求未成功，请重试';
 function save(auth: Auth|null) { try { if (auth) sessionStorage.setItem(storageKey,JSON.stringify(auth)); else sessionStorage.removeItem(storageKey); } catch { /* Storage is optional. */ } }
 function restore(): Auth|null { try { const value=JSON.parse(sessionStorage.getItem(storageKey)||'null'); return value && typeof value.id==='string' && typeof value.token==='string' ? {id:value.id,token:value.token} : null; } catch { return null; } }
+function retryableIntent(operation:Parameters<typeof api.write>[1],payload:Parameters<typeof api.write>[3],before:Snapshot,after:Snapshot) {
+  if(before.id!==after.id||before.playerRole!==after.playerRole||before.round!==after.round||before.phase!==after.phase)return false;
+  const role=before.playerRole;
+  const ownDeal=(s:Snapshot)=>s.deals.find(d=>d.round===s.round&&d.status==='effective'&&d.commitments?.[role]);
+  const sameSigned=()=>before.signedDealId===after.signedDealId&&ownDeal(before)?.id===ownDeal(after)?.id;
+  const terms=(d:Deal|undefined)=>JSON.stringify({text:d?.text,commitments:d?.commitments&&Object.entries(d.commitments).sort(([a],[b])=>a.localeCompare(b))});
+  if(operation==='ready')return ['negotiation','signing'].includes(after.phase)&&!after.readyRoles.includes(role);
+  if(operation==='action')return after.phase==='actions'&&!after.ownAction&&!after.submittedRoles.includes(role)&&after.legalActions.some(c=>c.id===payload?.actionId)&&sameSigned()&&terms(ownDeal(before))===terms(ownDeal(after))&&metrics.every(m=>before.roundStart[m.id]===after.roundStart[m.id]);
+  if(operation==='respond'){
+    const original=before.deals.find(d=>d.id===payload?.dealId),fresh=after.deals.find(d=>d.id===payload?.dealId);
+    return after.phase==='signing'&&sameSigned()&&!!original&&original.status==='pending'&&!!original.commitments?.[role]&&!original.accepted?.includes(role)&&!!fresh&&fresh.status==='pending'&&!!fresh.commitments?.[role]&&!fresh.accepted?.includes(role)&&terms(original)===terms(fresh);
+  }
+  return false;
+}
 
 export default function App() {
   const [playerRole,setPlayerRole] = useState<Role>('US');
@@ -100,7 +114,22 @@ export default function App() {
     catch(err){
       if(!mounted.current||epoch.current!==generation)return false;
       if(err instanceof ApiError&&err.status===409){
-        try{adopt(await api.read(auth),auth,generation);setError('局面已更新，请核对后再次提交。你的草稿已保留。')}
+        try{
+          const fresh=await api.read(auth);if(!mounted.current||epoch.current!==generation)return false;
+          adopt(fresh,auth,generation);
+          const latest=current.current?.id===auth.id?current.current.snapshot:fresh;
+          if(retryableIntent(operation,payload,auth.snapshot,latest)){
+            try{
+              const next=await api.write(auth,operation,latest.version,payload);
+              adopt(next,auth,generation);return mounted.current&&epoch.current===generation;
+            }catch(retryError){
+              if(!mounted.current||epoch.current!==generation)return false;
+              if(!(retryError instanceof ApiError&&retryError.status===409)){setError(messageOf(retryError));return false;}
+              adopt(await api.read(auth),auth,generation);
+            }
+          }
+          if(mounted.current&&epoch.current===generation)setError('局面已更新，请核对后再次提交。你的草稿已保留。');
+        }
         catch(refreshError){if(mounted.current&&epoch.current===generation)setError(`同步失败：${messageOf(refreshError)}。草稿已保留。`)}
       }else setError(messageOf(err));
       return false;
@@ -142,7 +171,7 @@ export default function App() {
     {error&&<div className="g-error" role="alert">{error}<button aria-label="关闭提示" onClick={()=>setError('')}>×</button></div>}
     {!snapshot?<main className="g-welcome"><h2>代表一方，争取自己的目标。</h2><p>四方、四回合。先达成自己的私人目标，并守住信用；谈判能帮你争取合作。</p><div className="g-rolechoices">{roles.map(r=><button key={r} aria-pressed={playerRole===r} onClick={()=>setPlayerRole(r)}><Avatar role={avatarRoles[r]}/><strong>{names[r]} {r}</strong></button>)}</div><button className="primary" disabled={!health?.enabled||!!busy||restoring} onClick={start}>{restoring?'恢复对局中…':busy==='start'?'正在创建对局…':'开始四回合博弈'}</button><p role="status">{healthError||(!health?.enabled?'模型不可用：服务端尚未配置 DeepSeek，暂不能开始。':'真实 DeepSeek 参与 · 私人目标随机抽取 · 不需要输入密钥')}</p><details><summary>想多了解一点？</summary><p>达成全部目标条件且信用 ≥1，为实质胜利。额外有至少一份全员履约协议，可获得外交胜利；美国还需国内产业压力 ≤1。游戏数值不代表现实政策预测。</p></details></main>:<>
       <section className="g-goal" aria-label="我的目标和差距"><div className="g-goalhead"><div><p className="g-eyebrow">你代表 {names[snapshot.playerRole]} · 第 {snapshot.round}/4 回合</p><h2>我的目标：{snapshot.ownGoal.label}</h2><p>第四回合末达成下列目标，并守住信用。</p></div><strong className="g-credit">信用 {own?.credit??1}/2</strong></div><div className="g-goalprogress">{snapshot.ownGoal.conditions.map(c=>{const value=c.metric==='effectiveT'?effectiveT(snapshot.state):snapshot.state[c.metric];const gap=Math.max(0,c.operator==='gte'?c.value-value:value-c.value);return <div key={c.metric}><div><strong>{metricTitle(c.metric)} {fmt(value)}</strong><span>目标 {c.operator==='gte'?'≥':'≤'} {c.value} · {gap<.001?'已达标':`还差 ${fmt(gap)}`}</span></div><progress max={c.operator==='gte'?Math.max(c.value,.1):Math.max(5-c.value,.1)} value={c.operator==='gte'?Math.min(value,c.value):Math.max(0,5-value)}/></div>})}</div><details><summary>更进一步：外交胜利</summary><p>实质胜利需全部目标条件和信用 ≥1。外交胜利另需至少 1 份全员履约协议；你已参与 {own?.fulfilledDeals??0} 份。{snapshot.playerRole==='US'&&`美国还需国内产业压力 ≤1，目前 ${snapshot.state.P}。有效 T 是自主技术缓冲后的实际目标值。`}</p></details></section>
-      <main className="g-task"><header><p className="g-eyebrow">{phaseName[snapshot.phase]} · 当前唯一任务</p><h2>{instructions[snapshot.phase][0]}</h2><p>{instructions[snapshot.phase][1]}</p>{snapshot.aiStatus?.busy&&<small role="status">{snapshot.aiStatus.role?names[snapshot.aiStatus.role]:'代表'}正在处理本阶段；你可以继续准备。</small>}</header>
+      <main className="g-task"><header><p className="g-eyebrow">{phaseName[snapshot.phase]} · 现在该做什么</p><h2>{instructions[snapshot.phase][0]}</h2><p>{instructions[snapshot.phase][1]}</p>{snapshot.aiStatus?.busy&&<small role="status">{snapshot.aiStatus.role?names[snapshot.aiStatus.role]:'代表'}正在处理本阶段；你可以继续准备。</small>}</header>
         {snapshot.phase==='negotiation'&&<><details className="g-reference"><summary>先看中文行动速查 · 我能交换什么？</summary>{roles.map(r=><div key={r}><h3>{names[r]}</h3>{cards[r].map(c=><button key={c.id} onClick={()=>setReference(c.id)}>{c.name}</button>)}</div>)}</details><section aria-label="谈判记录" className="g-messages">{snapshot.messages.length?snapshot.messages.map(m=><article key={m.id}><small>{names[m.from]} · 第 {m.round} 回合 · {m.to?`私聊 → ${names[m.to]}`:'公开'}</small><p><ActionText text={m.content} open={setReference}/></p></article>):<p>桌上还没有声明。可以先提出你想交换的行动。</p>}</section><section className="g-compose"><h3>你的声明 <small>{snapshot.messageCount}/2</small></h3><div className="g-formrow"><label>发送给<select aria-label="消息收件人" value={target} disabled={!negotiating} onChange={e=>setTarget(e.target.value as Role|'')}><option value="">公开 · 所有人</option>{roles.filter(r=>r!==snapshot.playerRole).map(r=><option key={r} value={r}>私聊 · {names[r]}</option>)}</select></label><label>润色语气<select aria-label="润色语气" value={tone} onChange={e=>setTone(e.target.value as typeof tone)}><option value="neutral">中性</option><option value="firm">坚定</option><option value="friendly">友好</option></select></label></div><textarea aria-label="谈判消息" placeholder="写一句话：你希望对方做什么，愿意交换什么？" value={draft} disabled={!negotiating||snapshot.messageCount>=2} onChange={e=>setDraft(e.target.value)}/><div className="g-buttons"><small>{count(draft)}/100 字</small><button onClick={()=>assist('polish')} disabled={!negotiating||!!assistBusy||!draft.trim()||count(draft)>100}>AI 润色</button><button className="primary" disabled={!negotiating||!!busy||!draft.trim()||count(draft)>100||snapshot.messageCount>=2} onClick={async()=>{if(await write('message',{content:draft,target:target||null}))setDraft('')}}>发送</button></div><p className="g-note">润色只填入可编辑候选，不会自动发送。</p><details><summary>＋ 发起正式协议（每轮 1 份）</summary><p>选择你和至少一方的本轮合法行动承诺。口头承诺不算正式协议，灰色交付不能签约。</p>{roles.map(r=><label key={r}>{names[r]}<select aria-label={`${names[r]}协议承诺`} value={commitments[r]??''} disabled={!negotiating||snapshot.proposalsMade>=1} onChange={e=>setCommitments(old=>{const next={...old};if(e.target.value)next[r]=e.target.value as ActionId;else delete next[r];return next})}><option value="">{r===snapshot.playerRole?'选择你的承诺':'不参加'}</option>{legalCommitments(r).map(c=><option value={c.id} key={c.id}>{c.name}</option>)}</select></label>)}<textarea aria-label="协议说明" value={dealText} onChange={e=>setDealText(e.target.value)} placeholder="说明（可选，最多300字，不生成额外政策效果）"/><button disabled={!negotiating||!!busy||!validProposal||count(dealText)>300||snapshot.proposalsMade>=1} onClick={()=>write('proposal',{commitments,text:dealText})}>提交提案（已发起 {snapshot.proposalsMade}/1）</button></details></section></>}
         {['negotiation','signing'].includes(snapshot.phase)&&<section><h3>{snapshot.phase==='signing'?'本轮邀请与协议':'本轮正式提案'}</h3>{snapshot.deals.filter(d=>d.round===snapshot.round).map(d=><DealView key={d.id} deal={d} viewer={snapshot.playerRole} canRespond={snapshot.phase==='signing'&&!ownReady&&!busy} respond={accept=>write('respond',{dealId:d.id,accept})}/>)}{!snapshot.deals.some(d=>d.round===snapshot.round)&&<p>本轮尚无正式提案。你可以跳过签约，仍能争取实质胜利。</p>}</section>}
         {snapshot.phase==='actions'&&<><p className="g-promise">{promised?`你的生效协议承诺：${cardName(promised)}。可以违约，但信用将减少。`:'本轮没有生效承诺，按目标自由选择。'}</p><div className="g-actions">{snapshot.legalActions.map(c=><button key={c.id} className={selectedAction===c.id||snapshot.ownAction===c.id?'selected':''} aria-pressed={selectedAction===c.id||snapshot.ownAction===c.id} disabled={!!snapshot.ownAction||!!busy} onClick={()=>setSelectedAction(c.id)}><strong>{c.name}</strong><span>{purpose[c.id]}</span></button>)}</div>{selectedAction&&<Preview preview={snapshot.actionPreviews?.find(p=>p.actionId===selectedAction)} snapshot={snapshot}/>}<details><summary>展开查看计算规则</summary>{snapshot.legalActions.filter(c=>!selectedAction||c.id===selectedAction).map(c=><p key={c.id}>{c.name}：{c.description}</p>)}</details>{snapshot.playerRole==='AS'&&snapshot.ownGreyRisk!==undefined&&<p>你的基础查获风险 {Math.round(snapshot.ownGreyRisk*100)}%；实际受本轮政策及协调变化影响，不等于已知对方选择后的查获概率。</p>}{promised&&selectedAction&&promised!==selectedAction&&<p className="g-warning">此行动与你的正式承诺不同，提交将导致违约。</p>}{snapshot.ownAction&&<p role="status">你已秘密提交：{cardName(snapshot.ownAction)}。等待其他代表。</p>}</>}
