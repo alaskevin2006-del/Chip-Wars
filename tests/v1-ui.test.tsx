@@ -67,6 +67,20 @@ describe('V1.6 real-service interface',()=>{
     await act(async()=>release(response({advice:{otherRequests:[],possibleMotives:[],relevantActions:['U1'],risks:['保持信用']}})));
     expect(calls('/secretary')).toHaveLength(1);
   });
+  it('discards a failed secretary request after phase transition and keeps the new primary task usable',async()=>{
+    let release:(value:Response)=>void=()=>{};const original=fetcher.getMockImplementation()!;
+    live={...live,readyRoles:['CN','NL','AS'],aiStatus:{busy:false}};
+    fetcher.mockImplementation(async(url:string,options?:RequestInit)=>url.endsWith('/secretary')?new Promise<Response>(r=>{release=r}):original(url,options));
+    await start();await waitFor(()=>expect(calls('/secretary')).toHaveLength(1));
+    live={...live,version:2,phase:'signing',readyRoles:[]};
+    fireEvent.click(screen.getByRole('button',{name:'结束谈判 · 就绪'}));
+    await screen.findByRole('heading',{name:'决定接受哪些邀请'});
+    await act(async()=>release(response({error:'上一阶段已经失效'},503)));
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect((screen.getByRole('button',{name:'结束签约 · 就绪'}) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByRole('button',{name:'结束签约 · 就绪'}));
+    await waitFor(()=>expect(calls('/ready')).toHaveLength(2));
+  });
   it('reconciles undisclosed aggregate effects and preserves hundredths in rounding adjustments',async()=>{
     live={...live,phase:'report',reportHistory:[{round:1,roundStart:base.state,actions:{US:'U1',CN:'PASS',NL:'PASS',AS:'hidden'},sources:{US:'player'},delta:{T:1.24,A:0,E:-.5,S:0,P:0},adjustment:{T:-.04,A:0,E:0,S:0,P:0},state:{T:3.2,A:2,E:2.5,S:1,P:0},effects:[{rule:'U1',description:'本轮管制成本',delta:{T:1.24,E:-1}},{rule:'UNDISCLOSED',description:'未公开方',delta:{E:.5}}],deals:[],credit:{US:1,CN:1,NL:1,AS:1},fulfilledDeals:{US:0,CN:0,NL:0,AS:0}}]};
     render(<App/>);await waitFor(()=>expect((screen.getByText('开始四回合博弈') as HTMLButtonElement).disabled).toBe(false));fireEvent.click(screen.getByText('开始四回合博弈'));
