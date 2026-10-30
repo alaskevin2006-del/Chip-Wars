@@ -136,7 +136,7 @@ export default function App() {
   const finishTour=()=>{setTutorial(null);try{localStorage.setItem('chip-guided-tour','done')}catch{/* optional */}};
   const primaryLabel=!snapshot?'':snapshot.phase==='finished'?'重新选择角色':snapshot.phase==='report'?`进入第 ${snapshot.round+1} 回合`:snapshot.phase==='actions'?snapshot.ownAction?'已提交，等待其余代表':'秘密提交行动':ownReady?'已就绪':snapshot.phase==='negotiation'?'结束谈判 · 就绪':'结束签约 · 就绪';
   const primaryDisabled=!!busy||!!snapshot&&(snapshot.phase==='actions'?(!!snapshot.ownAction||!selectedAction):['negotiation','signing'].includes(snapshot.phase)?ownReady:false);
-  const instructions:Record<Phase,[string,string]>={negotiation:['先谈一笔对你有用的交换','先查看行动速查，再公开发言或私聊。可以发起正式协议，也可以不发言直接进入签约。'],signing:['决定接受哪些邀请','核对你要承诺的行动是否帮助目标；条款只对参与方可见。可以拒绝或跳过未处理邀请。'],actions:['选一张帮助目标的行动卡','选中后先看条件化后果预览，再秘密提交。其他代表的真实选择未知；提交后不能更改。'],report:['看看行动改变了什么','核对目标差距、公开行动、未公开方的合计影响和取位截断。可以立即继续下一轮。'],finished:['查看你达成了什么','先看自己的目标与信用，再展开所有角色的结局。']};
+  const instructions:Record<Phase,[string,string]>={negotiation:['先谈一笔对你有用的交换','先看行动速查，写一句你想交换的行动或提交提案，AI 会围绕它回应；也可跳过发言，直接进入签约。'],signing:['决定接受哪些邀请','核对你要承诺的行动是否帮助目标；条款只对参与方可见。可以拒绝或跳过未处理邀请。'],actions:['选一张帮助目标的行动卡','选中后先看条件化后果预览，再秘密提交。其他代表的真实选择未知；提交后不能更改。'],report:['看看行动改变了什么','核对目标差距、公开行动、未公开方的合计影响和取位截断。可以立即继续下一轮。'],finished:['查看你达成了什么','先看自己的目标与信用，再展开所有角色的结局。']};
   return <div className="guided-app">
     <header className="g-header"><div><p className="g-eyebrow">CHIP DIPLOMACY · V1.6</p><h1>芯片外交</h1></div><div><small>DeepSeek · {health?.model||'连接中'}</small>{session&&<button onClick={reset} disabled={busy==='reset'}>结束对局</button>}</div></header>
     {error&&<div className="g-error" role="alert">{error}<button aria-label="关闭提示" onClick={()=>setError('')}>×</button></div>}
