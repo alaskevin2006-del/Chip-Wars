@@ -8,7 +8,7 @@ export function createProvider({env = process.env, fetchImpl = globalThis.fetch,
   const base = (env.DEEPSEEK_BASE_URL || env.LLM_BASE_URL || 'https://api.deepseek.com').replace(/\/+$/, '');
   const timeout = Math.max(50, Math.min(60000, Number(env.LLM_TIMEOUT_MS) || 45000));
   const maxTokens = Math.max(1000, Math.min(4000, Number(env.LLM_MAX_TOKENS) || 2200));
-  const limit = Math.max(0, Number(env.LLM_DAILY_LIMIT ?? 60));
+  const limit = env.LLM_DAILY_LIMIT?.trim().toLowerCase() === 'unlimited' ? Infinity : Math.max(0, Number(env.LLM_DAILY_LIMIT ?? 60));
   const ledgerPath = env.LLM_LEDGER_PATH || '';
   let calls = 0, day = new Date().toISOString().slice(0, 10), active = 0, queue = Promise.resolve();
   let validBase = false;

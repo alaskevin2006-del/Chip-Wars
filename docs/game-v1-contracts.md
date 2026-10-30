@@ -28,6 +28,7 @@ Keep server/diplomacy-index.mjs entry and createDiplomacyServer export. Old text
 
 GET /api/health -> {status:'ok',llm:{enabled,model},rulesVersion:'1.0'}.
 POST /api/diplomacy/sessions {playerRole:Role} -> Session. No client goals/draws/mode/rounds. Live unavailable503, reject mock/demo requests. Auth Bearer token for all session routes; viewer fixed at session creation.
+Prior text-client payloads {mode,rounds,player} receive409 with an explicit refresh-to-V1 message; they never create a game or spend provider calls. HTML entry uses Cache-Control:no-store; fingerprinted assets remain immutable.
 GET /api/diplomacy/sessions/:id -> Snapshot. UI polls about1second; never drives bot steps or settlement. Refresh can restore token sessionStorage if desired (no credentials stored), reset DELETE cancels current epoch.
 POST .../:id/message {expectedVersion,content,target} -> Snapshot
 POST .../:id/proposal {expectedVersion,commitments,text} -> Snapshot

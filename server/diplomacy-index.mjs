@@ -91,7 +91,9 @@ export function createDiplomacyServer(options={}){
      const ip=req.socket.remoteAddress||'',rate=ips.get(ip)||{count:0,until:now+60000};rate.count++;ips.set(ip,rate);if(rate.count>120||ips.size>4096)throw error('请求过于频繁。',429);
     }
     if(pathname==='/api/diplomacy/sessions'&&req.method==='POST'){
-     const input=await body(req);fields(input,['playerRole']);if(!ROLES.includes(input.playerRole))throw error('请选择四方中的一个角色。',400);
+     const input=await body(req);
+     if(!Object.hasOwn(input,'playerRole')&&['mode','rounds','player'].some(key=>Object.hasOwn(input,key)))throw error('页面版本已更新为四回合 V1.0。请刷新页面后重新选择角色并开局。',409);
+     fields(input,['playerRole']);if(!ROLES.includes(input.playerRole))throw error('请选择四方中的一个角色。',400);
      if(!provider.status().enabled)throw error('DeepSeek尚未配置，无法真实推演。',503);
      if(sessions.size>=30)throw error('会话已满，请稍后重试。',429);
      const s={id:randomBytes(16).toString('hex'),token:randomBytes(32).toString('hex'),state:game.createGame(typeof draw==='function'?draw():draw),playerRole:input.playerRole,created:Date.now(),touched:Date.now(),notices:[],epoch:0,busy:false,timer:null,controller:null,assists:new Set(),cancelled:false,phaseKey:null};
@@ -130,7 +132,7 @@ export function createDiplomacyServer(options={}){
    if(pathname.split('/').some(v=>v.startsWith('.')||v.includes('\\'))||pathname.includes('\0'))throw error('文件不存在。',404);
    let file=path.resolve(dist,`.${pathname}`);if(file!==dist&&!file.startsWith(dist+path.sep))throw error('文件不存在。',404);
    let data;try{if((await stat(file)).isDirectory())file=path.join(file,'index.html');data=await readFile(file);}catch{if(path.extname(pathname)||pathname.startsWith('/assets/'))throw error('文件不存在。',404);file=path.join(dist,'index.html');try{data=await readFile(file);}catch{throw error('请先构建前端。',503);}}
-   res.writeHead(200,{'Content-Type':MIME[path.extname(file)]||'application/octet-stream','Content-Length':data.length,'Cache-Control':pathname.startsWith('/assets/')?'public,max-age=31536000,immutable':'no-cache'});res.end(req.method==='HEAD'?undefined:data);
+   res.writeHead(200,{'Content-Type':MIME[path.extname(file)]||'application/octet-stream','Content-Length':data.length,'Cache-Control':path.extname(file)==='.html'?'no-store':pathname.startsWith('/assets/')?'public,max-age=31536000,immutable':'no-cache'});res.end(req.method==='HEAD'?undefined:data);
   }catch(e){if(!res.headersSent)json(res,e.status||500,{error:e.status?e.message:'服务暂时不可用，请重试。'});else res.end();}
  });
  server.requestTimeout=75000;server.headersTimeout=10000;server.on('close',()=>{for(const s of [...sessions.values()])discard(s);});return server;

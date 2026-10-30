@@ -1,5 +1,8 @@
 import {afterEach,describe,expect,it} from 'vitest';
 import type {Server} from 'node:http';
+import {mkdtemp,writeFile,mkdir,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
 import {createDiplomacyServer} from '../server/diplomacy-index.mjs';
 const servers:Server[]=[];
 afterEach(async()=>{await Promise.all(servers.splice(0).map(s=>new Promise<void>(resolve=>{s.closeAllConnections();s.close(()=>resolve());})));});
@@ -17,9 +20,23 @@ async function setup(extra:Parameters<typeof createDiplomacyServer>[0]={}){
  }};
  const server=createDiplomacyServer({env:{},provider,playerTimeoutMs:60000,reportDelayMs:60000,draws:{US:0,CN:0,NL:0,AS:1},...extra});servers.push(server);await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));const addr=server.address();if(!addr||typeof addr==='string')throw Error('No address');const origin=`http://127.0.0.1:${addr.port}`;
  const request=async(route:string,method='GET',body?:unknown,token?:string)=>{const res=await fetch(origin+route,{method,headers:{Origin:origin,'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})},...(body!==undefined?{body:JSON.stringify(body)}:{})});return {status:res.status,data:await res.json()};};
- return {request,seen};
+ return {request,seen,origin};
 }
 describe('V1 authoritative scheduling and privacy',()=>{
+ it('identifies the previous page request and asks for a refresh without creating a game',async()=>{
+  const {request,seen}=await setup();
+  const result=await request('/api/diplomacy/sessions','POST',{mode:'live',rounds:2,player:'China'});
+  expect(result.status).toBe(409);expect(result.data.error).toContain('刷新页面');expect(result.data.error).toContain('四回合 V1.0');expect(seen).toHaveLength(0);
+ });
+ it('never caches the HTML entry while retaining immutable fingerprinted assets',async()=>{
+  const dir=await mkdtemp(path.join(tmpdir(),'v1-client-version-'));
+  try{
+   await mkdir(path.join(dir,'assets'));await writeFile(path.join(dir,'index.html'),'<title>Chip Diplomacy V1.0</title>');await writeFile(path.join(dir,'assets','main-fingerprint.js'),'console.log("V1")');
+   const {origin}=await setup({distDir:dir});
+   for(const entry of ['/','/index.html','/dialogue']){const res=await fetch(origin+entry);expect(res.status).toBe(200);expect(res.headers.get('Cache-Control')).toBe('no-store');await res.text();}
+   const asset=await fetch(origin+'/assets/main-fingerprint.js');expect(asset.headers.get('Cache-Control')).toContain('immutable');await asset.text();
+  }finally{if(!path.resolve(dir).startsWith(path.resolve(tmpdir(),'v1-client-version-')))throw Error('Unexpected test directory');await rm(dir,{recursive:true,force:true});}
+ });
  it('executes four real-rule rounds with signed agreements, secret choices, breach and joint victory',async()=>{
   const {request,seen}=await setup();const created=await request('/api/diplomacy/sessions','POST',{playerRole:'US'});expect(created.status).toBe(201);const {id,token}=created.data,route=`/api/diplomacy/sessions/${id}`;
   expect((await request(route)).status).toBe(404);
