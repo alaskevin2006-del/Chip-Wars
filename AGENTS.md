@@ -1,6 +1,9 @@
-# Chip Diplomacy implementation boundaries
+# Chip Diplomacy V1 implementation boundaries
 
-User confirmed 2026-10-29: supersede V3 with four-agent text diplomacy. Preserve Chip-Wars source and history. docs/diplomacy-contracts.md is new contract; old V3/contracts govern legacy only.
-Exactly USA, China, Netherlands, ASML. Default three rounds, configurable 1–5. No economic scores, database, extra framework or fabricated model success. Production UI/API use real DeepSeek only; no demo fallback. Offline test/probe fixtures require an explicit server-only flag. Server holds keys and private sessions. No chain of thought.
-Feature tasks use separate branches/worktrees. Delegate engine and UI after stage 0. Engine owns server/diplomacy/{engine,scenario,demo}.mjs and tests/diplomacy-engine*. UI owns src/diplomacy/** except types.ts and tests/diplomacy-ui*. Coordinator owns shared types, HTTP/provider integration, root configuration, archives and docs. Preserve all old gameplay modules.
-Never commit credentials or server identities. Do not change unrelated services or global settings. Preserve local ports 3000/5001. Run npm run typecheck, npm run test, npm run build; report real results.
+User adopted docs/game-rules-v1.md on 2026-10-30. It supersedes prior text-only rules and old V3 ONLY for the new application. Exactly four roles US/CN/NL/AS, four rounds, metrics A/B/H/R per the specified game rules. All numbers are hypothetical game assumptions, never real predictions. No extra economic simulation, database or framework. Live DeepSeek only; offline tests may inject fixtures. Keys stay server-side; no chain of thought.
+
+Preserve legacy Chip-Wars and text-Diplomacy code/history. docs/game-v1-contracts.md and src/game-v1/types.ts freeze the new integration contract. No feature-task shared type edits; propose to coordinator.
+
+Feature tasks use separate worktrees/branches. After stage0 delegate engine and UI. Engine owns server/v1/engine.mjs and tests/v1-engine*. UI owns src/game-v1/** except types.ts, tests/v1-ui*. Coordinator owns shared contracts/types, HTTP/scheduling/LLM integration, dependencies, deployment, docs and integration tests. Engine is deterministic and immutable with explicit goal draws, no network/clock/UI. Observations expose only the corresponding role's goal/messages; no sealed opponent actions. Signing lock is atomic on last consent; settlement is idempotent.
+
+Public entry stays on original server port4187. Local ports3000/5001 remain. Never commit keys or server identity; never alter unrelated services/ports/sites, no global restarts/upgrades. Run npm run typecheck, npm run test, npm run build plus deployment regression tests. Report real results and model/timeout PASS honestly.
