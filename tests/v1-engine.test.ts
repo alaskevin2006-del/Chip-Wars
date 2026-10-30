@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 // The engine deliberately remains a dependency-free server-side ES module.
 // @ts-expect-error The frozen integration surface is documented in game-v1-contracts.md.
-import { ROLE_IDS, ACTIONS, GOAL_CATALOGUE, createGame, legalActions, sendMessage, proposeDeal, respondDeal, ready, submitAction, resolveRound, advanceRound, getSnapshot, getObservation } from '../server/v1/engine.mjs';
+import { ROLE_IDS, ACTIONS, GOAL_CATALOGUE, createGame, legalActions, sendMessage, proposeDeal, respondDeal, ready, submitAction, resolveRound, advanceRound, getSnapshot, getObservation } from '../server/v1/engine-v1.mjs';
 import type { Role, ActionId, Metrics, Snapshot } from '../src/game-v1/types';
 
 const roles: Role[] = ['US', 'CN', 'NL', 'AS'];
@@ -304,3 +304,4 @@ describe('V1 privacy, immutability and complete games', () => {
     expect(getSnapshot(missedThreshold, 'CN').results.CN.conditionsMet).toEqual([true, false]);
   });
 });
+
