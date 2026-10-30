@@ -29,6 +29,45 @@ async function start() {render(<App/>);await waitFor(()=>expect((screen.getByTex
 const calls=(suffix:string)=>fetcher.mock.calls.filter(([url])=>(url as string).endsWith(suffix));
 
 describe('V1.6 real-service interface',()=>{
+  it('retries the same secret action once after a benign NPC version race',async()=>{
+    live={...live,phase:'actions'};const original=fetcher.getMockImplementation()!;let attempts=0;
+    fetcher.mockImplementation(async(url:string,options?:RequestInit)=>{
+      if(url.endsWith('/action')){attempts++;if(attempts===1){live={...live,version:2,submittedRoles:['CN']};return response({error:'NPC advanced'},409);}return response({...live,version:3,ownAction:'U1',submittedRoles:['CN','US']});}
+      return original(url,options);
+    });
+    render(<App/>);await waitFor(()=>expect((screen.getByText('开始四回合博弈') as HTMLButtonElement).disabled).toBe(false));fireEvent.click(screen.getByText('开始四回合博弈'));
+    const card=await screen.findByRole('button',{name:/收紧技术管制/});await waitFor(()=>expect((card as HTMLButtonElement).disabled).toBe(false));fireEvent.click(card);fireEvent.click(screen.getByRole('button',{name:'秘密提交行动'}));
+    await screen.findByText(/你已秘密提交：收紧技术管制/);
+    expect(calls('/action').map(([,o])=>JSON.parse(o.body))).toEqual([{expectedVersion:1,actionId:'U1'},{expectedVersion:2,actionId:'U1'}]);expect(screen.queryByRole('alert')).toBeNull();
+  });
+  it('does not retry a secret action across a phase transition',async()=>{
+    live={...live,phase:'actions'};const original=fetcher.getMockImplementation()!;
+    fetcher.mockImplementation(async(url:string,options?:RequestInit)=>{if(url.endsWith('/action')){live={...live,version:2,phase:'report'};return response({error:'phase advanced'},409);}return original(url,options)});
+    render(<App/>);await waitFor(()=>expect((screen.getByText('开始四回合博弈') as HTMLButtonElement).disabled).toBe(false));fireEvent.click(screen.getByText('开始四回合博弈'));
+    const card=await screen.findByRole('button',{name:/收紧技术管制/});await waitFor(()=>expect((card as HTMLButtonElement).disabled).toBe(false));fireEvent.click(card);fireEvent.click(screen.getByRole('button',{name:'秘密提交行动'}));
+    await screen.findByText(/局面已更新/);expect(calls('/action')).toHaveLength(1);expect(screen.getByRole('button',{name:'进入第 2 回合'})).toBeTruthy();
+  });
+  it('retries an unchanged pending invitation with the same explicit response',async()=>{
+    const deal={id:'stable',round:1,proposer:'NL' as const,participants:['US','NL'] as const,commitments:{US:'U2' as const,NL:'N2' as const},text:'原定条款',accepted:['NL' as const],status:'pending' as const};
+    live={...live,phase:'signing',deals:[{...deal,participants:[...deal.participants]}]};const original=fetcher.getMockImplementation()!;let attempts=0;
+    fetcher.mockImplementation(async(url:string,options?:RequestInit)=>{if(url.endsWith('/respond')){attempts++;if(attempts===1){live={...live,version:2,readyRoles:['CN']};return response({error:'NPC signing'},409);}return response({...live,version:3,deals:[{...live.deals[0],accepted:['NL','US'],status:'effective'}]});}return original(url,options)});
+    render(<App/>);await waitFor(()=>expect((screen.getByText('开始四回合博弈') as HTMLButtonElement).disabled).toBe(false));fireEvent.click(screen.getByText('开始四回合博弈'));
+    const accept=await screen.findByRole('button',{name:'接受协议'});await waitFor(()=>expect((accept as HTMLButtonElement).disabled).toBe(false));fireEvent.click(accept);
+    await screen.findByText(/荷兰政府 发起 · 已生效/);expect(calls('/respond').map(([,o])=>JSON.parse(o.body))).toEqual([{expectedVersion:1,dealId:'stable',accept:true},{expectedVersion:2,dealId:'stable',accept:true}]);
+  });
+  it('requires manual review if the invitation terms changed during a version conflict',async()=>{
+    live={...live,phase:'signing',deals:[{id:'changed',round:1,proposer:'NL',participants:['US','NL'],commitments:{US:'U2',NL:'N2'},text:'原定条款',accepted:['NL'],status:'pending'}]};const original=fetcher.getMockImplementation()!;
+    fetcher.mockImplementation(async(url:string,options?:RequestInit)=>{if(url.endsWith('/respond')){live={...live,version:2,deals:[{...live.deals[0],commitments:{US:'U1',NL:'N2'},text:'已修改条款'}]};return response({error:'terms changed'},409);}return original(url,options)});
+    render(<App/>);await waitFor(()=>expect((screen.getByText('开始四回合博弈') as HTMLButtonElement).disabled).toBe(false));fireEvent.click(screen.getByText('开始四回合博弈'));
+    const accept=await screen.findByRole('button',{name:'接受协议'});await waitFor(()=>expect((accept as HTMLButtonElement).disabled).toBe(false));fireEvent.click(accept);
+    await screen.findByText(/局面已更新/);expect(calls('/respond')).toHaveLength(1);expect(screen.getByText('已修改条款')).toBeTruthy();
+  });
+  it('bounds benign ready retries to one then asks for manual review',async()=>{
+    const original=fetcher.getMockImplementation()!;
+    fetcher.mockImplementation(async(url:string,options?:RequestInit)=>{if(url.endsWith('/ready')){live={...live,version:live.version+1};return response({error:'racing again'},409);}return original(url,options)});
+    await start();const ready=screen.getByRole('button',{name:'结束谈判 · 就绪'});await waitFor(()=>expect((ready as HTMLButtonElement).disabled).toBe(false));fireEvent.click(ready);
+    await screen.findByText(/局面已更新/);expect(calls('/ready').map(([,o])=>JSON.parse(o.body).expectedVersion)).toEqual([1,2]);
+  });
   it('shows a skippable first-visit tour without taking a game action',async()=>{
     localStorage.removeItem('chip-guided-tour');await start();
     expect(screen.getByRole('dialog',{name:'一分钟上手'})).toBeTruthy();
