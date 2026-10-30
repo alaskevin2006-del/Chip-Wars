@@ -37,6 +37,10 @@ describe('guided previews and exact public reconciliation',()=>{
   const changed={...s,actions:{US:'U4',AS:'S4'},seed:100,roundSeed:987,goals:{...s.goals,AS:e.GOAL_CATALOGUE.AS[1]}};
   expect(e.getSnapshot(changed,'CN').actionPreviews).toEqual(p.actionPreviews);expect(JSON.stringify(p.actionPreviews)).not.toMatch(/seed|roundSeed|AS_GLOBAL|AS_CN/);
  });
+ it('preview merges own visible contract and caught penalties before clamping credit',()=>{
+  let s=initial();s=e.proposeDeal(s,'AS',{commitments:{AS:'S2',CN:'C3'},text:''});s=ready(s);s=e.respondDeal(s,'CN',{dealId:'d1',accept:true});s={...s,credit:{...s.credit,AS:2}};
+  const risk=e.previewAction(s,'AS','S4');expect(risk.branches[0].creditDelta).toBe(-2);expect(risk.branches[1].creditDelta).toBe(-1);expect(e.previewAction(s,'AS','S2').branches[0].creditDelta).toBe(0);
+ });
 });
 describe('deterministic signing responses',()=>{
  it('accepts beneficial visible cooperation, rejects worsening trades, and changes no state',()=>{
