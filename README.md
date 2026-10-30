@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/lithography-chessboard.png" alt="Lithography Chessboard - 半导体出口管制博弈" width="100%" />
+</p>
+
 # 芯片博弈 · CHIP WARS
 
 以虚构 2027 年为开局的六轮策略游戏。选择中国或美国政府，协调预算、许可、研发与外交。九个决策角色、有限行动点、延迟投资和可追溯战报；数值为游戏假设 `[G]`，不构成现实预测或政策建议。
