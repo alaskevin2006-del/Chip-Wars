@@ -141,4 +141,3 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1]
  const server=createDiplomacyServer({env:{...process.env,LLM_LEDGER_PATH:process.env.LLM_LEDGER_PATH||path.join(ROOT,'.runtime','diplomacy-quota.json')}});server.listen(Number(process.env.PORT||5001),process.env.HOST||'127.0.0.1',()=>console.log('Chip Diplomacy V1 listening'));
  for(const signal of ['SIGTERM','SIGINT'])process.on(signal,()=>server.close(()=>process.exit(0)));
 }
-

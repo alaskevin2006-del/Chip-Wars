@@ -18,4 +18,3 @@ export interface Session {id:string;token:string;snapshot:Snapshot}
 export interface NegotiationInput {messages:{content:string;target:Role|null}[];proposal:null|{commitments:Commitments;text:string}}
 export interface SigningInput {responses:{dealId:string;accept:boolean}[]}
 export interface SecretaryAdvice {otherRequests:string[];possibleMotives:{text:string;uncertain:true}[];relevantActions:ActionId[];risks:string[]}
-

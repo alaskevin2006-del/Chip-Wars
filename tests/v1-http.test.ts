@@ -81,4 +81,3 @@ describe('V1 authoritative scheduling and privacy',()=>{
   const secretary=seen.find(o=>o.task==='secretary');expect(secretary.ownGoal.role).toBe('US');expect(secretary.goals).toBeUndefined();expect(JSON.stringify(secretary.messages)).not.toContain('CN_PRIVATE_CANARY');
  });
 });
-

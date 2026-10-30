@@ -31,4 +31,3 @@ python3 ~/chip-diplomacy/current/ops/diplomacy-release.py rollback
 ```
 
 Later updates restore the previous Diplomacy release and wait for HTTP readiness. The first migration can restore the original Chip-Wars service and autostart state. Failed health checks attempt the same project-only restoration automatically. Old source, releases, service unit and private environment are retained. A text-only prior release does not expose rulesVersion1.6; use that release's health contract when validating rollback. The new V1 backup tag is backup/text-diplomacy-before-v1-20261030.
-

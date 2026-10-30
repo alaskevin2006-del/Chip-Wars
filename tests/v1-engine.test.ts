@@ -304,5 +304,3 @@ describe('V1 privacy, immutability and complete games', () => {
     expect(getSnapshot(missedThreshold, 'CN').results.CN.conditionsMet).toEqual([true, false]);
   });
 });
-
-

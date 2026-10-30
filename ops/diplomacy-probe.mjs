@@ -13,4 +13,3 @@ try{
  if(state.phase!=='finished'||state.reportHistory.length!==4||Object.keys(state.results).length!==4)throw Error('Incomplete4round game');
  console.log(JSON.stringify({productionProbe:'passed',rules:'1.6',rounds:4,results:4,externalProviderCalls:0}));
 }finally{server.closeAllConnections();server.close();}
-
