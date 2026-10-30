@@ -3,7 +3,7 @@ import type {Server} from 'node:http';
 import {mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import {createDiplomacyServer} from '../server/diplomacy-index.mjs';
+import {createDiplomacyServer} from '../server/text-diplomacy-index.mjs';
 // @ts-expect-error Runtime module is intentionally plain Node JavaScript.
 import {createProvider} from '../server/diplomacy/provider.mjs';
 const servers:Server[]=[];

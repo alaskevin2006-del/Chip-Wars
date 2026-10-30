@@ -1,21 +1,33 @@
-# Chip Diplomacy runtime
+# Chip Diplomacy V1 runtime
 
-New code is separate from legacy Chip-Wars. Do NOT use the old ops/deploy.sh for this application. New deployment uses ops/diplomacy-release.py and a separate chip-diplomacy.service, application directory, container and persistent quota ledger. Historical docs/progress.md describes only Chip-Wars.
+The current application implements docs/game-rules-v1.md: four roles, four rounds, private goals, negotiated action commitments and deterministic settlement. Old Chip-Wars and the earlier text-only Diplomacy sources remain available in Git and their original modules. Do not use the old ops/deploy.sh for this application.
 
-Local verified entry: http://127.0.0.1:3000 with Vite forwarding /api to http://127.0.0.1:5001. These are the inspected MiroFish configured ports; neither was listening before this task. No old process was stopped to claim them. Only this task's new backend was restarted during testing.
+## Local runtime
 
-Install Node22.16+/24, npm ci. Configure private .env from template. npm start loads only this project's .env on the server. npm run dev starts frontend with strictPort. Model keys are never VITE variables. npm run build creates new index.html and old legacy.html. Production-style local server serves dist and API from5001; original frontend dev entry stays3000.
+Use Node22.16+/24 and npm ci. Configure a private .env from .env.example. npm start serves the application and API on5001; npm run dev serves Vite on3000 and forwards /api to5001. npm run build builds the new index.html and preserved legacy.html. Keys must never use VITE_ variables. The production server has no npm runtime dependencies; package server/diplomacy-index.mjs, server/v1/*.mjs and server/diplomacy/*.mjs along with dist/ and the deployment scripts.
 
-For a future remote deployment, use a new isolated directory/service and explicitly reviewed target port, preserve unrelated services/default sites, set actual PUBLIC_ORIGIN, HOST and PORT, and protect .env/ledger directory. Node server needs no npm runtime dependencies after build, but must include all server/diplomacy/*.mjs files and server/diplomacy-index.mjs. Serve behind HTTPS for public access. Current session bearer tokens are capability tokens, not account authentication; do not publish a shared provider without additional access protection and appropriate provider account limits. Keep persistent quota ledger writable and private; active simulation memory is intentionally ephemeral.
+All production sessions require the configured real DeepSeek provider. Requests for demo mode, injected goals or configurable rounds are rejected. Unit tests and the network-disabled deployment probe inject an internal provider fixture through the server factory; this fixture is not a production API mode or runtime fallback. Missing/invalid model actions become explicitly labeled timeout PASS, never model success. The backend advances independently of browser polling. Human stages default to5minutes; reports auto-advance after20seconds. Games live only in backend memory and are lost on process restart; quota persists separately.
 
-Rollback locally: stop only these two development processes; start original MiroFish from its untouched directory, or create a fresh Chip-Wars worktree at backup/chip-wars-before-diplomacy-20261029. See archive/README.md. Credentials are excluded from source archives and must be configured separately.
+## Isolated release procedure
 
-## Server cutover procedure
+Keep the existing public address and4187 port. Use the isolated chip-diplomacy.service, container, immutable releases/current directory and private runtime ledger. Never change unrelated applications, proxy/default site, firewall, services or ports. No global restarts or upgrades.
 
-Verified release package contains only dist/, new server modules, new deployment/probe scripts and VERSION. No .env, source archives, node_modules, private connection information or chat logs. Supply its exact Git SHA and SHA256 digest. Transfer package and the deployment script over authenticated SSH/SFTP. Run `python3 /tmp/diplomacy-release.py install /tmp/chip-diplomacy-<sha>.tar.gz <sha> <sha256>` as the existing project deployment user.
+A release archive contains only dist/, the server modules above, ops/diplomacy-probe.mjs, ops/diplomacy-release.py and VERSION. Exclude .env, node_modules, source archives, private connection data and chat logs. Record the exact Git SHA and archive SHA256. Transfer the package and deployment script by authenticated SSH/SFTP, then run:
 
-The script checks service/container ownership, archive paths and content digest, uses the existing official Node24.21.0 image pinned by its actual image ID (no pull/upgrade), and tests the package in a read-only network-disabled temporary container. Only after that succeeds does it stop the old Chip-Wars service and start the new isolated service on the same4187 port. No other application, proxy, firewall, default site or port is modified. Old source, releases, unit and environment stay in place; only the old project's autostart is disabled to avoid port conflicts. Repeating an already-active version preserves rollback metadata and quota.
+```text
+python3 /tmp/diplomacy-release.py install /tmp/chip-diplomacy-<sha>.tar.gz <sha> <sha256>
+```
 
-The new private environment is derived server-side from the old project environment (credentials are never printed). Scope: own .config/chip-diplomacy child directory700, environment600, own runtime directory700. Timeout45seconds/output2200tokens; existing daily allowance retained. Migration converts the old integer-day ledger to the new ISO-date format and keeps the maximum current-day usage; rollback converts back without resetting allowance. Corrupt or uncertain quota is closed, never reset to a fresh allowance.
+The script validates ownership, archive paths/digest, and uses the existing official Node image by its exact local image ID without pulling or upgrading. A temporary read-only, network-disabled container first verifies the built frontend and all four V1 rounds with four final results. A successful offline probe does not verify provider access or public reachability. After it passes, only this project's service changes. Repeating the active version preserves quota and rollback metadata.
 
-Rollback: `python3 ~/chip-diplomacy/current/ops/diplomacy-release.py rollback`. First migration restores old Chip-Wars service/autostart; later updates restore the previous Diplomacy release. Failed health check attempts the same project-only restoration automatically. Validate public homepage/assets/API, three demo rounds, actual model calls, previous-version restoration, and unchanged unrelated container start/restart counts. Source-side checks: standard122game/API/UI tests plus `python3 -m unittest discover -s ops -p test_diplomacy_release.py` for quota migration and file-preservation guards. A successful local probe does not establish public reachability.
+Provider credentials remain in the existing private server environment, directory700/file600. Timeout45seconds, maximum output2200tokens, existing daily allowance retained. Legacy quota migration converts integer UTC days to ISO dates and preserves the maximum current-day usage. Corrupt/uncertain quota is closed rather than reset. Capability tokens are per-game access tokens, not user accounts; never expose them or keys in deployment evidence.
+
+After deployment verify the public homepage/assets, /api/health rulesVersion1.0, model configuration, a complete four-round real-provider game, privacy boundaries, and unchanged unrelated container start/restart counts. Distinguish successful LLM choices from timeout PASS in the report. Compare only key hashes inside the server when checking credential activation; never print environment contents. Run npm run typecheck, npm run test, npm run build and the four deployment regression tests with python -m unittest discover -s ops -p test_diplomacy_release.py before release.
+
+## Rollback
+
+```text
+python3 ~/chip-diplomacy/current/ops/diplomacy-release.py rollback
+```
+
+Later updates restore the previous Diplomacy release and wait for HTTP readiness. The first migration can restore the original Chip-Wars service and autostart state. Failed health checks attempt the same project-only restoration automatically. Old source, releases, service unit and private environment are retained. A text-only prior release does not expose rulesVersion1.0; use that release's health contract when validating rollback. The new V1 backup tag is backup/text-diplomacy-before-v1-20261030.

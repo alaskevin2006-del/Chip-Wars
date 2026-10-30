@@ -2,7 +2,7 @@ import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import path from 'node:path';
 import {buildDiplomacyMessages} from './prompts.mjs';
 
-export function createProvider({env = process.env, fetchImpl = globalThis.fetch} = {}) {
+export function createProvider({env = process.env, fetchImpl = globalThis.fetch, buildMessages = buildDiplomacyMessages} = {}) {
   const key = env.DEEPSEEK_API_KEY || env.LLM_API_KEY || '';
   const model = env.DEEPSEEK_MODEL || env.LLM_MODEL_NAME || 'deepseek-flash';
   const base = (env.DEEPSEEK_BASE_URL || env.LLM_BASE_URL || 'https://api.deepseek.com').replace(/\/+$/, '');
@@ -59,7 +59,7 @@ export function createProvider({env = process.env, fetchImpl = globalThis.fetch}
               method: 'POST', redirect: 'error', signal: controller.signal,
               headers: {'Content-Type': 'application/json', Authorization: `Bearer ${key}`},
               body: JSON.stringify({model, stream: false, max_tokens: maxTokens, thinking: {type: 'disabled'}, response_format: {type: 'json_object'},
-                messages: buildDiplomacyMessages(observation, attempt ? correction : undefined)})
+                messages: buildMessages(observation, attempt ? correction : undefined)})
             });
             if (!response.ok) { await response.body?.cancel().catch(() => {}); throw new Error(response.status === 429 ? 'upstream_rate_limit' : 'upstream_unavailable'); }
             const reader = response.body?.getReader();
