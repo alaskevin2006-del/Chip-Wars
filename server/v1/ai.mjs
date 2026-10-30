@@ -4,6 +4,21 @@ const plain=value=>value&&typeof value==='object'&&!Array.isArray(value);
 const keys=(value,allowed)=>plain(value)&&Object.keys(value).every(key=>allowed.includes(key));
 const text=(value,max)=>typeof value==='string'&&value.trim().length>0&&[...value].length<=max;
 
+// Only role-projected data is accepted here, never the private server state.
+export function buildDecisionBrief(observation) {
+ const state=observation.state||{},role=observation.role?.id||observation.playerRole;
+ const value=(s,key)=>key==='effectiveT'?Math.max(0,(s.T||0)-.5*Math.max(0,(s.S||0)-2)):(s[key]||0);
+ const conditions=observation.ownGoal?.conditions||[];
+ const gaps=s=>conditions.map(c=>({metric:c.metric,current:value(s,c.metric),target:c.value,operator:c.operator,gap:Math.max(0,c.operator==='gte'?c.value-value(s,c.metric):value(s,c.metric)-c.value)}));
+ return {round:observation.round,roundsLeft:Math.max(0,5-(observation.round||1)),goalProgress:gaps(state),
+  atBoundary:Object.entries(state).filter(([key,n])=>n===0||n===(key==='P'?2:5)).map(([metric,n])=>({metric,value:n})),
+  currentMessages:(observation.messages||[]).filter(m=>m.round===observation.round).map(m=>({id:m.id,from:m.from,to:m.to,content:m.content})),
+  ownVisibleOffers:(observation.deals||[]).filter(d=>d.round===observation.round&&d.commitments?.[role]).map(d=>({id:d.id,status:d.status,commitments:d.commitments,accepted:d.accepted})),
+  recentOwnActions:(observation.reportHistory||[]).map(r=>({round:r.round,ownAction:r.actions?.[role],state:r.state})),
+  options:(observation.actionPreviews||[]).map(p=>({actionId:p.actionId,assumptions:p.assumptions,riskIsEstimate:p.riskIsEstimate,branches:p.branches.map(b=>({label:b.label,probability:b.probability,state:b.state,goalProgress:gaps(b.state),delayed:b.delayed,creditDelta:b.creditDelta}))})),
+  instruction:'先比较本方目标差距、真实生效承诺和本轮可见请求，再选行动。预览是条件情景，不代表已知他人选择；没有可见合作意向时，不应只取最乐观的合作分支，明确拒绝配合时尤其应重新评估。收益已封顶或成本已封底时重估实际收益，不能机械复读上一轮。重复有意义时允许重复；不能为了变化而放弃目标。'};
+}
+
 export function buildGameMessages(observation,correction) {
   const {task,role,round,ownGoal}=observation;
   const schemas={negotiation:'{"messages":[{"content":"不超过100字的谈判消息","target":null}],"proposal":null}；若提协议，proposal为{"commitments":{"本方ID":"非PASS行动ID","另一参加者ID":"其合法非PASS行动ID"},"text":"条款说明"}',signing:'{"responses":[{"dealId":"收到的pending协议ID","accept":true}]}',action:'{"actionId":"本方合法行动ID"}',polish:'{"candidate":"保留原文意图、仅改善表达、最多100字的候选消息"}',secretary:'{"otherRequests":["可见要求"],"possibleMotives":[{"text":"基于可见信息的推测","uncertain":true}],"relevantActions":["玩家合法行动ID"],"risks":["与玩家自身目标相关的风险"]}'};
@@ -13,9 +28,9 @@ export function buildGameMessages(observation,correction) {
 
 自由发言不改数值。每角色每回合最多2消息、1提案；协议2–4方，须承诺本角色本轮合法的非PASS非S4行动，全员同意后锁定，每人最多1份生效协议。完整条款只对签约者可见，其他人只有参与方和状态，不得读取/转述不可见协议。允许违约，实际行动仍执行；守约信用+1、违约-1，灰色交付查获额外信用-1，先合计再截断0..2，全体守约才fulfilledDeals+1。实质胜利=本人目标全部数值条件且credit>=1；外交胜利另需fulfilledDeals>=1，美国另需P<=1。美国安全目标只看有效T=max(0,T-.5*max(0,S-2))>=4；其他目标看原始T。不能误称未签协议必定无法实质获胜。不能越权改规则、自创行动效果。可以争取降低自身目标缺口，也要权衡信用/合作和对手可能反应，未知目标仍只能推测。
 
-当前任务${task}。${task==='negotiation'?'结合本方目标和当前数值，给出具体、可执行的当轮交换条件，不要泛泛重复立场。最多2条消息，每条100个字符；可以0条。target=null为公开，否则仅指定另一角色私聊。不要把私聊内容转发给无权者。需要正式履约时可提交proposal，commitments必须包含本方及其他1–3方，行动均须合法非PASS。只写可行当轮承诺，不把未来条件或文本当额外可执行效果。若不想提案，proposal=null。输出messages和proposal两个字段。':''}
+当前任务${task}。${task==='negotiation'?'结合本方目标、decisionBrief目标差距、指标边界和本轮最新可见请求，给出具体的当轮交换条件，回应对方而不机械复读立场。面向玩家的正文使用中文行动名和指标含义，不能只堆U1/N2等编号；结构字段commitments仍使用行动ID。最多2条消息，每条100字；可以0条。target=null公开，否则仅指定另一角色私聊，不转发私聊给无权者。proposal须含本方及其他1–3方，本轮合法非PASS非S4承诺；未来条件不作为额外条款。若无提案proposal=null。':''}
 ${task==='signing'?'只处理自己收到的当前pending协议，按自己的秘密目标、承诺卡效果和信用考虑接受或拒绝；不擅自修改条款。可先前同意的pending安排尚未锁位，只有最后同意时后端才锁定。不要用accept给陌生/关闭/已同意协议重复同意。':''}
-${task==='action'?'本轮秘密选择一个本方合法行动。不能知道别人本轮已经选什么。可以遵守或违背自己已生效的承诺，但要权衡信用和正式胜利要求。仅输出actionId。':''}
+${task==='action'?'本轮秘密选择一个本方合法行动。不能知道别人本轮已经选什么。先对照decisionBrief的本方目标差距、当前信用、生效承诺、最新谈判与各情景后果。新请求或可信合作意向可能改变最佳行动；不能无视可见谈判，也不能把口头承诺当确定事实。指标达到边界时继续同一行动可能只有成本而无收益，据真实状态重新比较。仍最优时允许重复，禁止为变化而随意放弃目标。可以守约或违约，但权衡信用与胜利。只输出actionId，不输出隐藏推理过程。':''}
 ${task==='secretary'?'只为该玩家服务。根据真实可见发言/协议解释对方要求、可能动机、相关合法卡、对玩家实际目标的风险；所有对方动机必须标记uncertain:true。不能读取或猜作事实的他方目标；不提供对方密封行动。':''}
 ${task==='polish'?'仅润色玩家originalText，按tone(neutral中性/firm坚定/friendly友好)调整措辞，不添加任何新承诺、威胁、行动ID、数量、价格、时间或条件。无法安全扩写时保持原文。候选不会自动发送，需玩家确认。':''}
 仅返回json，无Markdown。结构：${schemas[task]}。本方实际目标：${JSON.stringify(ownGoal||null)}。这些秘密目标不能在公开谈判消息中原样披露。`;

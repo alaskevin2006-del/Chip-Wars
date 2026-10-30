@@ -4,7 +4,7 @@ import {readFile,stat} from 'node:fs/promises';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {randomBytes,randomInt,timingSafeEqual} from 'node:crypto';
 import * as game from './v1/engine.mjs';
-import {createGameProvider,validateEnvelope} from './v1/ai.mjs';
+import {createGameProvider,validateEnvelope,buildDecisionBrief} from './v1/ai.mjs';
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const ROLES=['US','CN','NL','AS'];
 const MIME={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.ico':'image/x-icon','.json':'application/json; charset=utf-8'};
@@ -34,7 +34,7 @@ export function createDiplomacyServer(options={}){
   if(task==='signing'){for(const response of output.responses)state=game.respondDeal(state,role,response);return game.ready(state,role);}
   return game.submitAction(state,role,output.actionId,'llm');
  }
- function taskObservation(s,role,task){return {...game.getObservation(s.state,role),task};}
+ function taskObservation(s,role,task){const projected={...game.getObservation(s.state,role),task};return {...projected,decisionBrief:buildDecisionBrief(projected)};}
  async function kick(s){
   if(s.busy||s.cancelled)return;clearTimeout(s.timer);s.busy=true;
   try{
@@ -48,6 +48,11 @@ export function createDiplomacyServer(options={}){
      if(phase==='actions'&&!s.state.actions[s.playerRole]){s.state=game.submitAction(s.state,s.playerRole,'PASS','timeout');notice(s,s.playerRole,'action','玩家未在时限内提交，后端以PASS兜底。');continue;}
      if(['negotiation','signing'].includes(phase)&&!s.state.readyRoles.includes(s.playerRole)){s.state=game.ready(s.state,s.playerRole);notice(s,s.playerRole,phase,'玩家等待时间已到，结束本阶段；未接受的协议不会自动生效。');continue;}
     }
+    // Let the player see the actions and state an intent before NPCs finish talking.
+    // Closing the page still advances after the same backend-owned deadline.
+    if(phase==='negotiation'&&!s.state.readyRoles.includes(s.playerRole)
+      &&!s.state.messages.some(m=>m.round===s.state.round&&m.from===s.playerRole)
+      &&!s.state.deals.some(d=>d.round===s.state.round&&d.proposer===s.playerRole))break;
     const role=ROLES.find(role=>role!==s.playerRole&&(phase==='actions'?!s.state.actions[role]:!s.state.readyRoles.includes(role)));
     if(!role)break;
     const task=phase==='actions'?'action':phase,epoch=s.epoch,key=phaseKey(s);
@@ -59,13 +64,20 @@ export function createDiplomacyServer(options={}){
      const output=await provider.decide(observation,value=>{
       const envelope=validateEnvelope(task,value,observation);if(!envelope.valid)return envelope;
       try{project(s.state,role,task,value);return {valid:true};}catch(e){return {valid:false,error:e.message};}
-     },s.controller.signal);
+     },s.controller.signal,()=>{if(s.cancelled||epoch!==s.epoch||key!==phaseKey(s))throw Error('stage_changed');return taskObservation(s,role,task);});
      if(s.cancelled||epoch!==s.epoch||key!==phaseKey(s))continue;
      s.state=project(s.state,role,task,output);
     }catch(e){
      if(s.cancelled||epoch!==s.epoch||key!==phaseKey(s))continue;
-     notice(s,role,task,task==='action'?'模型决策未成功，已按V1.6使用确定性策略兜底；优先履行合法协议，否则评估本方目标。':'模型未成功完成本阶段，未生成或发送替代示例内容。');
-     s.state=task==='action'?game.submitAction(s.state,role,game.chooseFallbackAction(s.state,role),'fallback'):game.ready(s.state,role);
+     if(task==='action'){
+      notice(s,role,task,'模型决策未成功，已按V1.6使用确定性策略兜底；优先履行合法协议，否则评估本方目标。');
+      s.state=game.submitAction(s.state,role,game.chooseFallbackAction(s.state,role),'fallback');
+     }else if(task==='signing'){
+      s.state=project(s.state,role,'signing',{responses:game.chooseFallbackResponses(s.state,role)});
+      notice(s,role,task,'签约模型未成功，已按可见条款、本方目标和签约冲突执行确定性接受或拒绝；未伪造模型回复。');
+     }else{
+      s.state=game.ready(s.state,role);notice(s,role,task,'谈判模型未成功，确定性处理为保留现有提案并结束发言；未生成替代示例消息。');
+     }
     }finally{s.controller=null;s.workerRole=null;s.workerTask=null;}
    }
   }catch(e){notice(s,undefined,'system','调度遇到错误，请重新开局。');s.halted=true;}

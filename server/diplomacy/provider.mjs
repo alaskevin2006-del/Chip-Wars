@@ -37,7 +37,7 @@ export function createProvider({env = process.env, fetchImpl = globalThis.fetch,
   }
   return {
     status: () => ({enabled: Boolean(key) && validBase && limit > 0, model}),
-    async decide(observation, validate, externalSignal) {
+    async decide(observation, validate, externalSignal, refreshObservation) {
       if (!key) throw new Error('not_configured');
       if (!validBase) throw new Error('invalid_configuration');
       if (active >= 2) throw new Error('provider_busy');
@@ -59,7 +59,7 @@ export function createProvider({env = process.env, fetchImpl = globalThis.fetch,
               method: 'POST', redirect: 'error', signal: controller.signal,
               headers: {'Content-Type': 'application/json', Authorization: `Bearer ${key}`},
               body: JSON.stringify({model, stream: false, max_tokens: maxTokens, thinking: {type: 'disabled'}, response_format: {type: 'json_object'},
-                messages: buildMessages(observation, attempt ? correction : undefined)})
+                messages: buildMessages(refreshObservation ? refreshObservation() : observation, attempt ? correction : undefined)})
             });
             if (!response.ok) { await response.body?.cancel().catch(() => {}); throw new Error(response.status === 429 ? 'upstream_rate_limit' : 'upstream_unavailable'); }
             const reader = response.body?.getReader();
