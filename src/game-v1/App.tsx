@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
+import { BookOpen } from 'lucide-react';
 import { Avatar, Robot } from '../diplomacy/Illustrations';
 import { api, ApiError, type Auth } from './api';
 import { avatarRoles, cards, cardName, metrics, names, roles } from './catalogue';
+import { CONTEXT_INTRO_STORAGE_KEY, IntroGuide, hasCompletedContextIntro } from './IntroGuide';
 import type { ActionId, ActionPreview, ClaimKind, CommitLevel, Commitments, Deal, IssueId, NewsItem, Phase, Preference, Role, RoundBrief, RoundReport, SecretaryAdvice, Session, Snapshot, Standing, Statement, TermId, Tone } from './types';
 import './styles.css';
 
@@ -55,6 +57,7 @@ export default function App() {
   const [healthError,setHealthError] = useState('');
   const [servedBuild,setServedBuild] = useState<string>('');
   const [session,setSession] = useState<Session|null>(null);
+  const [introOpen,setIntroOpen] = useState(()=>!hasCompletedContextIntro());
   const [restoring,setRestoring] = useState(false);
   const [busy,setBusy] = useState('');
   const [error,setError] = useState('');
@@ -281,15 +284,16 @@ export default function App() {
   const validProposal=!!snapshot&&Object.keys(commitments).length>=2&&!!commitments[snapshot.playerRole]&&Object.entries(commitments).every(([r,id])=>legalCommitments(r as Role).some(c=>c.id===id));
   const report=snapshot?.reportHistory.find(r=>r.round===reportRound)??snapshot?.reportHistory.at(-1);
   const finishTour=()=>{setTutorial(null);try{localStorage.setItem('chip-guided-tour','done')}catch{/* optional */}};
+  const finishContextIntro=()=>{setIntroOpen(false);try{localStorage.setItem(CONTEXT_INTRO_STORAGE_KEY,'done')}catch{/* optional */}};
   const primaryLabel=!snapshot?'':snapshot.phase==='finished'?'重新选择角色':snapshot.phase==='report'?`进入第 ${snapshot.round+1} 回合`:snapshot.phase==='actions'?snapshot.ownAction?'已提交，等待其余代表':'秘密提交措施':snapshot.phase==='announcement'?snapshot.declaredRoles?.includes(snapshot.playerRole)?'已发表，等待其余代表':'保持静默':ownReady?'已就绪':snapshot.phase==='negotiation'?'结束磋商 · 就绪':'结束安排 · 就绪';
   const primaryDisabled=!!busy||!!snapshot&&(snapshot.phase==='actions'?(!!snapshot.ownAction||!selectedAction):snapshot.phase==='announcement'?!!snapshot.declaredRoles?.includes(snapshot.playerRole):['negotiation','signing'].includes(snapshot.phase)?ownReady:false);
   const stale=!!BUILD_TIME&&!!servedBuild&&servedBuild!==BUILD_TIME;
   const instructions:Record<Phase,[string,string]>={announcement:['就一个议题发表公开宣示','美方先公开宣示，其余各方观测后再表态。宣示是议题层面的姿态，不是措施卡：它更新各方对你的类型判断，并按语义在结算时与你的实际措施核对。也可以保持静默——不做承诺就没有代价。'],negotiation:['先谈一笔对你有用的交换','先看措施速查，再发出首条消息或安排草案，AI 会围绕首批输入回应。之后的补充仍用于安排与措施判断；也可跳过发言。'],signing:['决定接受哪些安排','核对你要承诺的措施是否帮助目标；条款只对参与方可见。可以拒绝或跳过未处理邀请。'],actions:['选择一项抬高你收益的措施','选中后先看条件化后果预览：每个情景都会给出相对提升 ΔU，而不只是指标变化。再秘密提交。其他代表的真实选择未知；提交后不能更改。'],report:['看看措施改变了什么','核对指标、公开措施、未公开方的合计影响和取位截断，以及本回合你收益的变化。可以立即继续下一轮。'],finished:['查看你达成了什么','先看自己的偏好与相对提升，再展开所有角色的结局——偏好此时全部揭晓，可以看到每一方实际在最大化什么。']};
   return <div className="guided-app">
-    <header className="g-header"><div><p className="g-eyebrow">CHIP DIPLOMACY · V1.6{buildLabel(BUILD_TIME)?` · 构建 ${buildLabel(BUILD_TIME)}`:''}</p><h1>芯片外交</h1></div><div><small>DeepSeek · {health?.model||'连接中'}</small>{session&&<button onClick={reset} disabled={busy==='reset'}>结束对局</button>}</div></header>
+    <header className="g-header"><div><p className="g-eyebrow">CHIP DIPLOMACY · V1.6{buildLabel(BUILD_TIME)?` · 构建 ${buildLabel(BUILD_TIME)}`:''}</p><h1>芯片外交</h1></div><div>{!introOpen&&<button className="g-header-intro" onClick={()=>setIntroOpen(true)}><BookOpen aria-hidden="true" size={15}/>开局必读</button>}<small>DeepSeek · {health?.model||'连接中'}</small>{session&&<button onClick={reset} disabled={busy==='reset'}>结束对局</button>}</div></header>
     {stale&&<div className="g-stale" role="status">线上已有新版本（{buildLabel(servedBuild)}），你打开的是旧页面（{buildLabel(BUILD_TIME)}）。<button onClick={()=>location.reload()}>刷新页面</button></div>}
     {error&&<div className="g-error" role="alert">{error}<button aria-label="关闭提示" onClick={()=>setError('')}>×</button></div>}
-    {!snapshot?<main className="g-welcome"><h2>代表一方，把局势推向你要的方向。</h2><p>四方、四回合。你抽到本方两种政策偏好之一：它只决定同一个局势对你值多少，不改变你能做什么。四回合末把相对开局的收益提升做上去，并守住信用。</p><div className="g-rolechoices">{roles.map(r=><button key={r} aria-pressed={playerRole===r} onClick={()=>setPlayerRole(r)}><Avatar role={avatarRoles[r]}/><strong>{names[r]} {r}</strong></button>)}</div><button className="primary" disabled={!health?.enabled||!!busy||restoring} onClick={start}>{restoring?'恢复对局中…':busy==='start'?'正在创建对局…':'开始四回合博弈'}</button><p role="status">{healthError||(!health?.enabled?'模型不可用：服务端尚未配置 DeepSeek，暂不能开始。':'真实 DeepSeek 参与 · 私人偏好随机抽取 · 不需要输入密钥')}</p><details><summary>想多了解一点？</summary><p>收益 U = 偏好权重对归一化局势项加权求和，再加信用的小额加成。第四回合末 ΔU ≥ 门槛且信用 ≥1 为实质胜利；另有一份全员履约安排为外交胜利。偏好只影响评价，不影响可选措施。游戏数值不代表现实政策预测。</p></details></main>:<>
+    {introOpen?<IntroGuide onComplete={finishContextIntro}/>:<>{!snapshot?<main className="g-welcome"><h2>代表一方，把局势推向你要的方向。</h2><p>四方、四回合。你抽到本方两种政策偏好之一：它只决定同一个局势对你值多少，不改变你能做什么。四回合末把相对开局的收益提升做上去，并守住信用。</p><div className="g-rolechoices">{roles.map(r=><button key={r} aria-pressed={playerRole===r} onClick={()=>setPlayerRole(r)}><Avatar role={avatarRoles[r]}/><strong>{names[r]} {r}</strong></button>)}</div><button className="primary" disabled={!health?.enabled||!!busy||restoring} onClick={start}>{restoring?'恢复对局中…':busy==='start'?'正在创建对局…':'开始四回合博弈'}</button><p role="status">{healthError||(!health?.enabled?'模型不可用：服务端尚未配置 DeepSeek，暂不能开始。':'真实 DeepSeek 参与 · 私人偏好随机抽取 · 不需要输入密钥')}</p><details><summary>想多了解一点？</summary><p>收益 U = 偏好权重对归一化局势项加权求和，再加信用的小额加成。第四回合末 ΔU ≥ 门槛且信用 ≥1 为实质胜利；另有一份全员履约安排为外交胜利。偏好只影响评价，不影响可选措施。游戏数值不代表现实政策预测。</p></details></main>:<>
       <StatusHud snapshot={snapshot}/>
       <div className="g-layout">
       <div className="g-main">
@@ -340,6 +344,7 @@ export default function App() {
     {snapshot&&tutorial!==null&&<div className="g-overlay"><section role="dialog" aria-modal="true" aria-label="一分钟上手" className="g-dialog"><p className="g-eyebrow">一分钟上手 · {tutorial+1}/3</p><h2>{['先看你的偏好','每个阶段只做一件事','先看后果，再决定'][tutorial]}</h2><p>{['你代表的角色和私人偏好始终在顶部：它会告诉你同一个局势对你值多少。第四回合末把相对开局的收益提升到门槛以上并守住信用，是第一件事。','谈判可以交换行动，签约决定承诺，实际措施才会改数值；底部按钮告诉你下一步。','行动选中后会显示条件化后果，每个情景都给出相对提升 ΔU。别人的选择未知，预览不保证最终结果；公式和历史在局势详情。'][tutorial]}</p><div className="g-buttons"><button onClick={finishTour}>跳过引导</button><button className="primary" onClick={()=>tutorial===2?finishTour():setTutorial(tutorial+1)}>{tutorial===2?'开始我的回合':'下一步提示'}</button></div></section></div>}
     {reference&&<div className="g-overlay"><section role="dialog" aria-modal="true" aria-label="措施说明" className="g-dialog"><h2>{cardName(reference)}</h2><p>{purpose[reference]}</p><p>{Object.values(cards).flat().find(c=>c.id===reference)?.description}</p><small>这是公开的行动规则，不代表对方已经选择。</small><button onClick={()=>setReference(null)}>关闭措施说明</button></section></div>}
     <p className="g-disclaimer">虚构策略游戏 · 所有数值为游戏假设 [G]</p>
+    </>}
   </div>;
 }
 

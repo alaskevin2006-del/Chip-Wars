@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../src/game-v1/App';
 import { cards, roles, names } from '../src/game-v1/catalogue';
+import { CONTEXT_INTRO_STORAGE_KEY } from '../src/game-v1/IntroGuide';
 import type { Preference, Session, Snapshot, Standing, TermId } from '../src/game-v1/types';
 // Fixtures are hand-written so the interface can be tested without a running engine. They mirror what
 // getSnapshot now projects: a private preference with weights, not a checklist of Boolean targets.
@@ -17,7 +18,7 @@ const response=(data:unknown,status=200)=>new Response(JSON.stringify(data),{sta
 let live:Snapshot;
 let fetcher:ReturnType<typeof vi.fn>;
 beforeEach(()=>{
-  sessionStorage.clear();localStorage.setItem('chip-guided-tour','done');live=structuredClone(base);
+  sessionStorage.clear();localStorage.setItem('chip-guided-tour','done');localStorage.setItem(CONTEXT_INTRO_STORAGE_KEY,'done');live=structuredClone(base);
   fetcher=vi.fn(async(input:string,options?:RequestInit)=>{
     if(input==='/api/health')return response({status:'ok',rulesVersion:'1.6',llm:{enabled:true,model:'deepseek-chat'}});
     if(input==='/api/diplomacy/sessions')return response({id:live.id,token:'test-session-token',snapshot:live});
@@ -34,6 +35,30 @@ async function start() {render(<App/>);await waitFor(()=>expect((screen.getByTex
 const calls=(suffix:string)=>fetcher.mock.calls.filter(([url])=>(url as string).endsWith(suffix));
 
 describe('V1.6 real-service interface',()=>{
+  it('requires all three context pages before welcome and persists completion for reopening',async()=>{
+    localStorage.removeItem(CONTEXT_INTRO_STORAGE_KEY);
+    render(<App/>);
+    expect(screen.queryByText('开始四回合博弈')).toBeNull();
+    expect(screen.getByRole('heading',{name:'半导体何以重要？'})).toBeTruthy();
+    expect(screen.getByRole('img',{name:'全球半导体关键环节与主要经济体份额地图'}).getAttribute('src')).toBe('/intro/semiconductor-importance.jpeg');
+    expect(screen.queryByText('我已阅读，进入游戏')).toBeNull();
+    fireEvent.click(screen.getByText('继续阅读'));
+    expect(screen.getByRole('heading',{name:'半导体全球产业链分布'})).toBeTruthy();
+    expect(screen.getByRole('img',{name:'半导体上中下游产业链与终端应用示意图'}).getAttribute('src')).toBe('/intro/semiconductor-supply-chain.png');
+    expect(screen.getByRole('img',{name:'全球半导体供给与需求格局分布图'}).getAttribute('src')).toBe('/intro/global-supply-demand.png');
+    fireEvent.click(screen.getByText('继续阅读'));
+    expect(screen.getByRole('heading',{name:'利益关系图速览'})).toBeTruthy();
+    const stakeholders=screen.getByRole('dialog');
+    expect(screen.getByRole('img',{name:'美国、中国、荷兰与 ASML 的半导体利益关系图'}).getAttribute('src')).toBe('/intro/stakeholder-interest-map.png');
+    expect(stakeholders.textContent).toContain('美国：掌握技术规则与长臂管辖工具，但必须承受管制带来的本土商业损失');
+    expect(stakeholders.textContent).toContain('ASML：手握不可替代的光刻技术垄断优势，却同时受制于美国域外管辖与荷兰本国出口许可');
+    fireEvent.click(screen.getByText('我已阅读，进入游戏'));
+    await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
+    expect(localStorage.getItem(CONTEXT_INTRO_STORAGE_KEY)).toBe('done');
+    expect(screen.getByText('开始四回合博弈')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button',{name:'开局必读'}));
+    expect(screen.getByRole('heading',{name:'半导体何以重要？'})).toBeTruthy();
+  });
   it('brings a selected preview into view and returns to cards without clearing the choice or submitting',async()=>{
     const descriptor=Object.getOwnPropertyDescriptor(HTMLElement.prototype,'scrollIntoView'),scroll=vi.fn();
     Object.defineProperty(HTMLElement.prototype,'scrollIntoView',{configurable:true,value:scroll});
