@@ -19,3 +19,4 @@ jobs:
       - run: npm run build
       - run: bash -n ops/deploy.sh && bash -n ops/preflight.sh && bash -n ops/rollback.sh
       - run: bash ops/test-release-paths.sh
+      - run: python3 -m unittest discover -s ops -p test_diplomacy_release.py

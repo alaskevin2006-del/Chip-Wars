@@ -1,16 +1,7 @@
-# Chip-Wars implementation boundaries
+# Chip Diplomacy V1.6 implementation boundaries
 
-Read docs/game-baseline-v3.md and docs/contracts.md before changing code. V3.0 is the only game specification. Exactly nine agents and 24 action templates plus HOLD. Every numerical coefficient is a game assumption [G]. No extra economic simulation, database or framework.
+User adopted docs/game-rules-v16.md on2026-10-30. It supersedes previous V1/V3 only for current application. Four roles/four rounds, T/A/E/S/P, all numbers game assumptions[G]. No added economics/database/framework. Real DeepSeek first; explicit deterministic fallback ONLY after failure per V1.6, never mock provider output. Keys server-side, no chain of thought. Preserve legacy versions/history.
 
-Never commit credentials or server identity. All provider credentials are server environment variables. Do not alter other server projects, ports, default sites or services. No global restarts or upgrades.
+Stage0 shared types src/game-v1/types.ts and docs/game-v16-contracts.md are frozen for feature tasks. Delegate engine and UI into separate branches/worktrees after stage0. Engine owns server/v1/engine.mjs and tests/v16-engine*. UI owns src/game-v1/** except types.ts and tests/v1-ui*. Coordinator owns shared types/contracts, AI, HTTP, integration, docs, deployment. Engine deterministic immutable with explicit seed; sealed AS choices and private deal terms must never leak through nested report/effect/source projections. No network/clock in engine.
 
-Feature tasks use separate branches and worktrees. Delegation is explicitly requested for the engine and UI tasks after stage 0 completes. Owners:
-- feat/engine: src/engine/** except frozen types.ts, src/agents/rule.ts, tests/engine*, tests/agents*.
-- feat/ui: src/ui/**, src/App.tsx, UI styles, tests/ui*.
-- feat/llm: server/**, src/agents/llm.ts, tests/llm*.
-- feat/deploy: ops/**, docs/deployment.md.
-- Coordinator/integrator: shared contract/types, root dependencies, docs, orchestration integration and CI.
-
-Do not modify frozen exports or shared types in feature tasks. Propose changes to coordinator. resolveTurn is deterministic, immutable and has no network, UI or clock. Agent observations hide all other agents' private information. Rule fallback must complete six rounds for either player.
-
-Run npm run typecheck, npm run test and npm run build. Report real results. Do not claim live deployment or provider access without verification.
+Original public4187, local3000/5001 unchanged. No credentials/server identity in Git; no unrelated services/sites/ports, no global restarts/upgrades. Run typecheck/test/build and deployment regressions. Report real provider/fallback honestly.

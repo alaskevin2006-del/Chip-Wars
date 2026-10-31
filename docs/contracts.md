@@ -1,3 +1,5 @@
+> 历史版本说明：本文仅适用于保留的旧 Chip-Wars，不是当前线上芯片外交的冻结规格。现行规则为 [V1.6](game-rules-v16.md)，现行接口为 [V1.6 contract](game-v16-contracts.md)。
+
 # Frozen contracts — V3.0
 
 Canonical data types: src/engine/types.ts. GameState extends WorldState; no duplicate writable UI indicators. Config is stored on state so observation/validation use the identical rules. Initial numeric configuration, costs, delays, AP and all mechanics parameters are [G] in config.ts.
