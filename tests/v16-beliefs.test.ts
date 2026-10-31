@@ -1,7 +1,7 @@
 import {describe,it,expect} from 'vitest';
 // @ts-expect-error Server-only module.
 import * as e from '../server/v1/engine.mjs';
-const roles=['US','CN','NL','AS'];
+const roles=['US','NL','CN','AS'];
 const skipA=(s:any)=>s.phase==='announcement'?roles.reduce((s,r)=>e.declare(s,r,null),s):s;
 const initial=(seed=1,draws={US:0,CN:0,NL:0,AS:0})=>skipA(e.createGame(draws,seed));
 const ready=(s:any)=>roles.reduce((s,r)=>e.ready(s,r),s);
@@ -61,16 +61,16 @@ describe('V1.6 type beliefs and signaling',()=>{
   for(const o of ['US','CN','NL'])expect(unseen.beliefs[o].AS).toBe(.5);
   let caught:any;
   for(let seed=0;seed<1000;seed++){const s=run(initial(seed),{AS:'S4'});if(s.randomRecords[0].caught){caught=s;break;}}
-  for(const o of ['US','CN','NL'])expect(caught.beliefs[o].AS).toBeCloseTo(.54,6);
-  expect(caught.publicBeliefs.AS).toBeCloseTo(.54,6);
+  for(const o of ['US','CN','NL'])expect(caught.beliefs[o].AS).toBeCloseTo(.55,6);
+  expect(caught.publicBeliefs.AS).toBeCloseTo(.55,6);
  });
  it('fulfilled promises convince the signatories more than the room',()=>{
   const s=run(sign(initial()),{US:'U2',CN:'C3'});
   expect(s.deals[0].status).toBe('fulfilled');
-  expect(s.beliefs.US.CN).toBeCloseTo(.23,6); // signatory knows which measure was delivered
-  expect(s.beliefs.NL.CN).toBeCloseTo(.39,6); // the room only learns that something went right
-  expect(s.beliefs.AS.CN).toBeCloseTo(.39,6);
-  expect(s.publicBeliefs.CN).toBeCloseTo(.39,6);
+  expect(s.beliefs.US.CN).toBeCloseTo(.27,6); // signatory knows which measure was delivered
+  expect(s.beliefs.NL.CN).toBeCloseTo(.44,6); // the room only learns that something went right
+  expect(s.beliefs.AS.CN).toBeCloseTo(.44,6);
+  expect(s.publicBeliefs.CN).toBeCloseTo(.44,6);
   // Terms are private, so every outsider reaches exactly the public reading of the same conduct.
   expect(s.beliefs.NL.CN).toBe(s.publicBeliefs.CN);
   expect(Math.abs(s.beliefs.US.CN-.5)).toBeGreaterThan(Math.abs(s.beliefs.NL.CN-.5));
@@ -79,9 +79,9 @@ describe('V1.6 type beliefs and signaling',()=>{
   const before=sign(initial());
   const s=run(before,{US:'U2',CN:'C1'});
   expect(s.deals[0].status).toBe('breached');
-  expect(s.beliefs.US.CN).toBeCloseTo(.59,6);
-  expect(s.beliefs.NL.CN).toBeCloseTo(.62,6);
-  expect(s.publicBeliefs.CN).toBeCloseTo(.62,6);
+  expect(s.beliefs.US.CN).toBeCloseTo(.55,6);
+  expect(s.beliefs.NL.CN).toBeCloseTo(.6,6);
+  expect(s.publicBeliefs.CN).toBeCloseTo(.6,6);
   // Each observer started the round somewhere else — the signatory had read the signature — so
   // compare how far this round moved them, not where they happened to end up.
   expect(Math.abs(s.beliefs.US.CN-before.beliefs.US.CN)).toBeGreaterThan(Math.abs(s.beliefs.NL.CN-before.beliefs.NL.CN));

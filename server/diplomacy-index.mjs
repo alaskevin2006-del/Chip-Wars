@@ -65,7 +65,9 @@ export function createDiplomacyServer(options={}){
  const playerTimeout=options.playerTimeoutMs??300000,reportDelay=options.reportDelayMs??20000;
  const draw=options.draws??(()=>Object.fromEntries(ROLES.map(role=>[role,randomInt(2)])));
  const seed=options.seed??(()=>randomBytes(4).readUInt32LE(0));
- const phaseKey=s=>`${s.state.round}:${s.state.phase}`;
+ // The deadline belongs to a window, not to the whole phase: each new actor resets the clock, so a
+ // player never loses thinking time to the LLM calls of the windows before theirs.
+ const phaseKey=s=>`${s.state.round}:${s.state.phase}:${s.state.phase==='actions'?(game.currentActor(s.state)??'done'):'-'}`;
  function synchronize(s){const key=phaseKey(s);if(key!==s.phaseKey){s.phaseKey=key;s.deadlineAt=Date.now()+(s.state.phase==='report'?reportDelay:playerTimeout);}}
  function snapshot(s){synchronize(s);persist(s);return {...game.getSnapshot(s.state,s.playerRole),id:s.id,deadlineAt:s.state.phase==='finished'?undefined:s.deadlineAt,aiStatus:{busy:s.busy,...(s.workerRole?{role:s.workerRole,task:s.workerTask}:{})},notices:structuredClone(s.notices)};}
  function notice(s,role,task,message){s.notices.push({round:s.state.round,role,task,message});if(s.notices.length>100)s.notices.shift();}
@@ -94,7 +96,7 @@ export function createDiplomacyServer(options={}){
      break;
     }
     if(Date.now()>=s.deadlineAt){
-     if(phase==='actions'&&!s.state.actions[s.playerRole]){s.state=game.submitAction(s.state,s.playerRole,'PASS','timeout');notice(s,s.playerRole,'action','玩家未在时限内提交，后端以PASS兜底。');continue;}
+     if(phase==='actions'&&game.currentActor(s.state)===s.playerRole){s.state=game.submitAction(s.state,s.playerRole,'PASS','timeout');notice(s,s.playerRole,'action','玩家未在时限内提交，后端以PASS兜底。');continue;}
      if(phase==='announcement'&&!Object.hasOwn(s.state.statements,s.playerRole)&&(s.playerRole==='US'||Object.hasOwn(s.state.statements,'US'))){s.state=game.declare(s.state,s.playerRole,null,'timeout');notice(s,s.playerRole,'declare','玩家表态超时，按保持静默处理。');continue;}
      if(['negotiation','signing'].includes(phase)&&!s.state.readyRoles.includes(s.playerRole)){s.state=game.ready(s.state,s.playerRole);notice(s,s.playerRole,phase,'玩家等待时间已到，结束本阶段；未接受的协议不会自动生效。');continue;}
     }
@@ -105,7 +107,11 @@ export function createDiplomacyServer(options={}){
     if(phase==='negotiation'&&!s.state.readyRoles.includes(s.playerRole)
       &&!s.state.messages.some(m=>m.round===s.state.round&&m.from===s.playerRole)
       &&!s.state.deals.some(d=>d.round===s.state.round&&d.proposer===s.playerRole))break;
-    const role=ROLES.find(role=>role!==s.playerRole&&(phase==='actions'?!s.state.actions[role]:phase==='announcement'?!Object.hasOwn(s.state.statements,role):!s.state.readyRoles.includes(role)));
+    // In the actions phase only the role whose window is open may move; everyone else is waiting
+    // for a fact, and the loop breaks when that fact has to come from the player.
+    const role=phase==='actions'
+      ?(actor=>actor&&actor!==s.playerRole?actor:null)(game.currentActor(s.state))
+      :ROLES.find(role=>role!==s.playerRole&&(phase==='announcement'?!Object.hasOwn(s.state.statements,role):!s.state.readyRoles.includes(role)));
     if(!role)break;
     const task=phase==='actions'?'action':phase==='announcement'?'declare':phase,epoch=s.epoch,key=phaseKey(s);
     s.workerRole=role;s.workerTask=task;
@@ -200,16 +206,19 @@ export function createDiplomacyServer(options={}){
      if(s.state.phase!=='announcement')throw error('当前阶段不能发表公开宣示。');
      if(Object.hasOwn(s.state.statements,s.playerRole))throw error('本轮已发表过公开宣示。');
      if(s.playerRole!=='US'&&!Object.hasOwn(s.state.statements,'US'))throw error('须等待美方先发表公开宣示。');
-     if(typeof input.text!=='string'||!input.text.trim()||[...input.text].length>100)throw error('请输入1–100字的表态原文。');
+     if(typeof input.text!=='string'||[...input.text].length>100)throw error('表态原文最多100字；留白则由幕僚代拟。');
+     const original=input.text.trim();
      const controller=new AbortController(),epoch=s.epoch;s.assists.add(controller);
      let output;
      try{
-      const observation={...taskObservation(s,s.playerRole,'declare'),originalText:input.text,issues:game.ISSUE_IDS};
+      // A blank draft asks the aide to propose a stance outright; the prompt branch is chosen by originalText.
+      const observation={...taskObservation(s,s.playerRole,'declare'),...(original?{originalText:original}:{}),issues:game.ISSUE_IDS};
       output=await provider.decide(observation,value=>validateEnvelope('declare',value,observation),controller.signal);
       if(!validateEnvelope('declare',output,observation).valid)throw Error();
-     }catch{throw error('AI服务未能判定出有效立场，请改用下方议题模板或稍后重试；未生成示例内容。',503);}finally{s.assists.delete(controller);}
+     }catch{throw error('幕僚未能判定出有效立场，可直接保持静默或换一种说法后重试；未生成示例内容。',503);}finally{s.assists.delete(controller);}
      if(s.cancelled||epoch!==s.epoch)throw error('会话已重开，请重新请求。',409);
-     json(res,200,{statement:output,source:'llm'});return;
+     // reason is advice for the player, never part of the recorded statement the engine stores.
+     json(res,200,{statement:{issue:output.issue,tone:output.tone,level:output.level,target:output.target??null,text:output.text},reason:output.reason||'',drafted:!original,source:'llm'});return;
     }
     const allowed={declare:['issue','tone','level','target','text'],newscast:[],brief:[],message:['content','target'],proposal:['commitments','text'],respond:['dealId','accept'],ready:[],action:['actionId'],next:[]};fields(input,['expectedVersion',...allowed[route]]);
     if(!Number.isInteger(input.expectedVersion)||input.expectedVersion!==s.state.version)throw error('状态已更新，请同步后重试；草稿可保留。',409);

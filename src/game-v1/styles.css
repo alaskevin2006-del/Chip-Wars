@@ -3,11 +3,22 @@
 .guided-app{padding-bottom:120px}.g-next{position:fixed;left:50%;transform:translateX(-50%);width:min(1212px,calc(100% - 48px));bottom:10px;margin-top:0}@media(max-width:650px){.guided-app{padding-bottom:120px}.g-next{width:calc(100% - 24px);bottom:5px}}
 .g-preview-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}.g-preview-heading h3,.g-action-heading{scroll-margin-top:20px}.g-preview-heading button{flex-shrink:0;font-size:12px}.g-preview-premises{margin:6px 0}.g-preview-premises summary{font-size:12px;color:#72816f;padding:3px 0}.g-action-heading{margin:12px 0}
 .g-beliefs{border:1px solid #d9e0d0;border-radius:14px;padding:18px 22px;background:#f2f6ea;margin-bottom:16px}
+/* Compact preference status strip above the task card, and the merged detail block in the intel panel. */
+.g-goalslim{padding:14px 18px}
+.g-goalslim .g-goalhead{margin-bottom:6px}
+.g-goalslim h2{font-size:16px}
+.g-utility>div{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}
+.g-utility span{font-size:12px;color:#72816f}
+.g-ownpref{background:#fffef5;border:1px solid #e2e5d6;border-radius:10px;padding:12px 14px;margin-bottom:12px}
+.g-ownpref h3{margin:10px 0 2px}
+.g-ownpref h3:first-child{margin-top:0}
+.g-ownpref>p{margin:4px 0}
 .g-beliefgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin:12px 0}
 .g-belief{background:#fffef5;border:1px solid #e2e5d6;border-radius:10px;padding:12px}
 .g-beliefhead{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
 .g-beliefhead small{font-size:11px;color:#72816f}
-.g-beliefbar{display:flex;height:10px;border-radius:6px;overflow:hidden;margin-top:10px;background:#e4e9d8}
+.g-belieflabels{display:flex;justify-content:space-between;font-size:10px;color:#8d9a7e;margin-top:8px}
+.g-beliefbar{display:flex;height:10px;border-radius:6px;overflow:hidden;margin-top:4px;background:#e4e9d8}
 .g-beliefbar span:first-child{background:#638354}
 .g-beliefbar span:last-child{background:#c9b26a}
 .g-ownimage{background:#eaf0dd;border-radius:9px;padding:10px 12px;font-size:12px;line-height:1.7}
@@ -50,9 +61,14 @@
 .g-aide h3{margin:10px 0 2px}
 .g-aide button{margin-top:10px;font-size:12px}
 @media(max-width:800px){.g-layout{grid-template-columns:minmax(0,1fr)}.g-hud{position:static;max-height:none}}
-.g-stancegrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin:12px 0}
-.g-stancegrid>div{background:#fffef5;border:1px solid #e2e5d6;border-radius:10px;padding:10px 12px}
-.g-stancegrid strong{display:block;font-size:12px;margin-bottom:8px;color:#5d6b58}
+.g-stancecard{margin:12px 0;background:#fffef5;border:1px solid #e2e5d6;border-radius:12px;padding:12px 15px}
+.g-stancecard h3{margin:0 0 6px;font-size:13px;color:#3f4d3b}
+.g-stancerow{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:7px 0;border-top:1px dashed #e7ebdd}
+.g-stancerow:first-of-type{border-top:0}
+.g-stancerow span{font-size:11px;color:#72816f;min-width:56px}
+.g-stancerow strong{font-size:12px;color:#2f3d2b}
+.g-stancerow>button{font-size:11px;padding:2px 8px}
+.g-stancerow .g-buttons{flex:1 0 100%;justify-content:flex-start;flex-wrap:wrap;gap:6px}
 .g-stancefield{margin:12px 0}
 .g-stancefield label{display:block;font-size:12px;color:#5d6b58;margin-bottom:6px}
 .g-stancefield textarea{width:100%;box-sizing:border-box;border:1px solid #d9e0d0;border-radius:9px;padding:9px 11px;font:inherit;font-size:13px;line-height:1.7;background:#fffef5}

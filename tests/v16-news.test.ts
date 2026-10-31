@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error Server-only module.
 import * as e from '../server/v1/engine.mjs';
-const roles = ['US', 'CN', 'NL', 'AS'] as const;
+const roles = ['US', 'NL', 'CN', 'AS'] as const;
 const fresh = (seed = 1) => e.createGame({ US: 0, CN: 0, NL: 0, AS: 0 }, seed);
 const stance = (issue: string, tone: string, level = 'pledge', target: string | null = null) =>
   ({ issue, tone, level, target, text: `${issue} ${tone} ${level}` });

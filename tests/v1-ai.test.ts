@@ -25,6 +25,34 @@ describe('V1 AI task boundaries',()=>{
  });
  it('prompts each task from supplied role projection and only permits legal action IDs',()=>{
   expect(validateEnvelope('action',{actionId:'C1'},obs).valid).toBe(false);expect(validateEnvelope('action',{actionId:'U3'},obs).valid).toBe(true);
-  const messages=buildGameMessages({...obs,task:'action'});expect(messages[0].content).toContain('不能知道别人本轮已经选什么');expect(messages[0].content).toContain('不得声称知道对方隐藏偏好');expect(JSON.stringify(messages)).toContain('US_SEC');
+  const messages=buildGameMessages({...obs,task:'action'});expect(messages[0].content).toContain('不能知道尚未行动角色本轮会选什么');expect(messages[0].content).toContain('不得声称知道对方隐藏偏好');expect(JSON.stringify(messages)).toContain('US_SEC');
+ });
+ it('tailors secretary guidance to the current phase and falls back to negotiation',()=>{
+  const secretary=(phase?:string)=>buildGameMessages({...obs,task:'secretary',...(phase?{phase}:{})})[0].content;
+  expect(secretary('announcement')).toContain('当前是公开宣示阶段');
+  expect(secretary('signing')).toContain('当前是签约阶段');
+  expect(secretary('actions')).toContain('当前是实际措施阶段');
+  expect(secretary('report')).toContain('当前是战报阶段');
+  expect(secretary('negotiation')).toContain('当前是闭门磋商阶段');
+  // Missing or unknown phase keeps the negotiation template so prompts stay analyzable.
+  expect(secretary(undefined)).toContain('当前是闭门磋商阶段');
+  expect(secretary('mystery')).toContain('当前是闭门磋商阶段');
+  // Phase-specific guidance must not leak into other phases' prompts. The system rules mention every
+  // phase by name, so the assertion targets the guidance prefix instead of the bare phase word.
+  expect(secretary('signing')).not.toContain('当前是公开宣示阶段');
+  expect(secretary('announcement')).not.toContain('当前是签约阶段');
+ });
+ it('accepts a short reason on a stance and switches to drafting when no sentence is given',()=>{
+  const declareObs={...obs,task:'declare',issues:['controls','licensing']};
+  const stance={issue:'licensing',tone:'dove',level:'pledge',target:null,text:'我方愿意就设备许可与各方保持沟通。'};
+  expect(validateEnvelope('declare',stance,declareObs).valid).toBe(true);
+  expect(validateEnvelope('declare',{...stance,reason:'落在设备许可议题。'},declareObs).valid).toBe(true);
+  // The reason is advice for the player, so it is optional but never unbounded.
+  expect(validateEnvelope('declare',{...stance,reason:'字'.repeat(41)},declareObs).valid).toBe(false);
+  const drafted=buildGameMessages({...declareObs,originalText:undefined})[0].content;
+  expect(drafted).toContain('代拟');
+  expect(drafted).toContain('判定理由');
+  // Rewording an existing sentence uses the other branch; a blank draft must not claim to polish one.
+  expect(buildGameMessages({...declareObs,originalText:'荷兰应保持自主'})[0].content).toContain('把玩家的原始措辞转成');
  });
 });

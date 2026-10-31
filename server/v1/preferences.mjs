@@ -83,11 +83,24 @@ export const preferencesOf = role => PREFERENCE_CATALOGUE[role] ?? [];
 export const CREDIT_BONUS = 0.05;   // per point of credit above the starting value [G]
 export const DEAL_BONUS = 0.05;     // per fully-kept arrangement [G]
 export const START_CREDIT = 1;
-// 实质胜利 = ΔU ≥ δ 且 credit ≥ 1；外交胜利 = 实质胜利 且 fulfilledDeals ≥ 1。
-// δ is a single global constant: every type is judged on how much it improved its own position,
-// so no type is handed an easier or harder target. Calibrated by ops/v16-calibrate.mjs [G].
+// 实质胜利 = ΔU ≥ δ(role) 且 credit ≥ 1；外交胜利 = 实质胜利 且 fulfilledDeals ≥ 1。
+// δ is tiered by role: the pro-active US/NL side is held to a tighter bar (0.12), while the
+// containment-bearing CN/AS side — whose core metrics are partially driven by others' actions —
+// gets a softer bar (0.08). This is not a handout: the engine σ already shows US ~57% under 0.10,
+// CN_TRADE/AS_CN ~20%; tiered δ brings every type into a 30–55% band so no draw is auto-win or
+// auto-lose. Calibrated by ops/v16-calibrate.mjs [G].
 export const DELTA_THRESHOLD = 0.10;
+export const DELTA_THRESHOLD_TIER = Object.freeze({
+  US: 0.12,
+  NL: 0.12,
+  CN: 0.08,
+  AS: 0.08,
+});
 export const MIN_CREDIT_TO_WIN = 1;
+export const deltaThresholdFor = prefId => {
+  const pref = preferenceById(prefId);
+  return pref ? DELTA_THRESHOLD_TIER[pref.role] : DELTA_THRESHOLD;
+};
 
 export function score(prefId, state) {
   const pref = preferenceById(prefId);
@@ -107,35 +120,41 @@ export const initialUtility = prefId => utility(prefId, INITIAL_STATE);
 export function deltaU(prefId, state, credit = START_CREDIT, fulfilledDeals = 0) {
   return Math.round((utility(prefId, state, credit, fulfilledDeals) - initialUtility(prefId)) * 1e6) / 1e6;
 }
-export function thresholdOf(prefId) { return initialUtility(prefId) + DELTA_THRESHOLD; }
+export function thresholdOf(prefId) { return initialUtility(prefId) + deltaThresholdFor(prefId); }
 export function evaluate(prefId, state, credit = START_CREDIT, fulfilledDeals = 0) {
   const u = utility(prefId, state, credit, fulfilledDeals);
   const delta = Math.round((u - initialUtility(prefId)) * 1e6) / 1e6;
-  const substantive = delta >= DELTA_THRESHOLD - 1e-9 && (credit ?? START_CREDIT) >= MIN_CREDIT_TO_WIN;
-  return { prefId, score: score(prefId, state), utility: u, delta, deltaThreshold: DELTA_THRESHOLD,
+  const threshold = deltaThresholdFor(prefId);
+  const substantive = delta >= threshold - 1e-9 && (credit ?? START_CREDIT) >= MIN_CREDIT_TO_WIN;
+  return { prefId, score: score(prefId, state), utility: u, delta, deltaThreshold: threshold,
     substantiveVictory: substantive, diplomaticVictory: substantive && (fulfilledDeals ?? 0) >= 1 };
 }
 
 // --- Milestone badges. The old hard goal cards, demoted: they describe a position, they never decide. ---
-const condition = (metric, operator, value) => ({ metric, operator, value });
-const badge = (role, id, label, conditions) => ({
-  role, id, label, conditions,
-  description: `${conditions.map(c => `${c.metric === 'effectiveT' ? '有效T' : c.metric}${c.operator === 'gte' ? '≥' : '≤'}${c.value}`).join('，')}`,
-});
+// A badge pairs with the preference carrying the same id, and its condition reads the very score
+// the game already computes: a badge lights up when that preference's route score (Σ weight ×
+// normalised state, i.e. the player-facing 局面得分) crosses a per-route bar. Bars are calibrated
+// per route from engine self-play (ops-tmp/badge-bar.mjs) so every badge is attainable-but-
+// demanding — roughly 7–23% of self-play games — because the routes do not reach the same heights.
+const BADGE_BARS = freeze({ US_SEC: 0.70, US_ALLY: 0.66, CN_TECH: 0.58, CN_TRADE: 0.76, NL_ALLY: 0.62, NL_TRADE: 0.72, AS_CN: 0.68, AS_GLOBAL: 0.60 });
+const badge = (role, id, label, note) => {
+  const pref = preferenceById(id);
+  return { role, id, label, note, bar: BADGE_BARS[id],
+    description: `${note}达成条件：按「${pref.label}」的权重路线，把局面得分推到 ${BADGE_BARS[id]} 以上（高分线按各路线可达性分别校准）。` };
+};
 export const MILESTONES = freeze({
-  US: [badge('US', 'US_SEC', '安全优先', [condition('effectiveT', 'gte', 4)]),
-       badge('US', 'US_ALLY', '联盟优先', [condition('A', 'gte', 4), condition('T', 'gte', 3)])],
-  CN: [badge('CN', 'CN_TECH', '自主突破', [condition('S', 'gte', 3), condition('T', 'lte', 3)]),
-       badge('CN', 'CN_TRADE', '合作维持', [condition('T', 'lte', 2), condition('E', 'gte', 4)])],
-  NL: [badge('NL', 'NL_ALLY', '协调优先', [condition('A', 'gte', 4), condition('E', 'gte', 3)]),
-       badge('NL', 'NL_TRADE', '商业优先', [condition('T', 'lte', 2), condition('A', 'lte', 3), condition('E', 'gte', 4)])],
-  AS: [badge('AS', 'AS_CN', '对华深耕', [condition('T', 'lte', 2), condition('A', 'gte', 3), condition('E', 'gte', 4)]),
-       badge('AS', 'AS_GLOBAL', '全球多元', [condition('E', 'gte', 5), condition('A', 'gte', 3)])],
+  US: [badge('US', 'US_SEC', '小院高墙', '现实原型：2022年10月美国出口管制新规，全面收紧对华先进芯片与设备供应。'),
+       badge('US', 'US_ALLY', '盟友同步', '现实原型：2023年1月美日荷就半导体设备出口管制达成三方协议。')],
+  CN: [badge('CN', 'CN_TECH', '国产替代', '现实原型：2023年华为 Mate 60 搭载国产 7nm 芯片，国产替代明显加速。'),
+       badge('CN', 'CN_TRADE', '市场基本盘', '现实原型：中国保持全球最大半导体市场地位，合作与反制并行。')],
+  NL: [badge('NL', 'NL_ALLY', '同步管制', '现实原型：2023年荷兰宣布限制先进 DUV 光刻机对华出口。'),
+       badge('NL', 'NL_TRADE', '订单保卫战', '现实原型：荷兰为 ASML 争取在管制生效前完成既有对华订单交付。')],
+  AS: [badge('AS', 'AS_CN', '中国红利期', '现实原型：2024年中国市场一度占 ASML 销售额约一半。'),
+       badge('AS', 'AS_GLOBAL', '多元对冲', '现实原型：ASML 加速 High-NA EUV 与全球多元布局，降低单一市场依赖。')],
 });
-// A badge pairs with the preference it was named after; it is a trophy, not a scoreboard.
+// A badge pairs with the preference carrying the same id; it is a trophy, not a scoreboard.
 export const milestoneOf = (prefId) => MILESTONES[preferenceById(prefId)?.role]?.find(b => b.id === prefId) ?? null;
 export function milestoneState(state, badge) {
-  const values = { ...state, effectiveT: effectiveT(state) };
-  const met = badge.conditions.map(c => (c.operator === 'gte' ? values[c.metric] >= c.value : values[c.metric] <= c.value));
-  return { badgeId: badge.id, conditionsMet: met, earned: met.every(Boolean) };
+  const earned = score(badge.id, state) >= badge.bar - 1e-9;
+  return { badgeId: badge.id, conditionsMet: [earned], earned };
 }

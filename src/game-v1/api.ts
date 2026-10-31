@@ -23,7 +23,7 @@ export const api = {
   remove: (auth: Auth) => request<{deleted:true}>(path(auth),'DELETE',undefined,auth),
   write: (auth: Auth, operation: 'message'|'proposal'|'respond'|'ready'|'action'|'next', expectedVersion: number, payload: {content?:string;target?:Role|null;commitments?:Commitments;text?:string;dealId?:string;accept?:boolean;actionId?:ActionId} = {}) => request<Snapshot>(path(auth,`/${operation}`),'POST',{expectedVersion,...payload},auth),
   declare: (auth: Auth, expectedVersion: number, statement: Statement|null) => request<Snapshot>(path(auth,'/declare'),'POST',{expectedVersion,...(statement||{issue:null})},auth),
-  draftStatement: (auth: Auth, text: string) => request<{statement:Statement;source:'llm'}>(path(auth,'/statement'),'POST',{text},auth),
+  draftStatement: (auth: Auth, text: string) => request<{statement:Statement;reason:string;drafted:boolean;source:'llm'}>(path(auth,'/statement'),'POST',{text},auth),
   newscast: (auth: Auth, expectedVersion: number) => request<{items:NewsItem[]}>(path(auth,'/newscast'),'POST',{expectedVersion},auth),
   brief: (auth: Auth, expectedVersion: number) => request<{brief:RoundBrief|null}>(path(auth,'/brief'),'POST',{expectedVersion},auth),
   polish: (auth: Auth, text: string, tone: 'neutral'|'firm'|'friendly' = 'neutral') => request<{candidate:string;source:'llm'|'original'}>(path(auth,'/polish'),'POST',{text,tone},auth),

@@ -11,19 +11,22 @@ import type { Preference, Session, Snapshot, Standing, TermId } from '../src/gam
 const preference:Preference={id:'US_SEC',role:'US',label:'安全优先',blurb:'宁可牺牲商业收益，也要压住技术空间',description:'技术空间优先',weights:{Teff:.5,A:.2,E:.1,LowP:.2}};
 const termLabels={Teff:'有效技术难度',A:'美荷协调',E:'商业收益',S:'中国自主能力',Access:'对华渠道敞口',LowA:'低压制',LowP:'美国低压力'} as Record<TermId,string>;
 const catalogue=Object.fromEntries(roles.map(role=>[role,[{...preference,id:`${role}_1`,role,label:'公开类型甲'},{...preference,id:`${role}_2`,role,label:'公开类型乙'}]])) as Snapshot['preferenceCatalogue'];
-const milestones=Object.fromEntries(roles.map(role=>[role,[{id:`${role}_badge`,role,label:'收紧到 4 以上',description:'第四回合末有效技术难度 ≥4',conditionsMet:[false],earned:false}]])) as Snapshot['milestones'];
+const milestones=Object.fromEntries(roles.map(role=>[role,[{id:`${role}_badge`,role,label:'小院高墙',description:'现实原型：2022.10 美国出口管制新规。达成条件：按「安全优先」的权重路线，把局面得分推到 0.7 以上。',conditionsMet:[false],earned:false}]])) as Snapshot['milestones'];
 const standing:Standing={prefId:preference.id,score:.54,utility:.54,delta:0,deltaThreshold:.1,substantiveVictory:false,diplomaticVictory:false,credit:1,fulfilledDeals:0,won:false,initial:.54,terms:{Teff:.4,A:.4,E:.6,S:.2,Access:.6,LowA:.6,LowP:1},preference};
 const base:Snapshot={id:'one',version:1,round:1,totalRounds:4,phase:'negotiation',state:{T:2,A:2,E:3,S:1,P:0},roundStart:{T:2,A:2,E:3,S:1,P:0},playerRole:'US',roles:roles.map(id=>({id,name:names[id],description:'公开利益',credit:1,fulfilledDeals:0,possiblePreferences:[{id:`${id}_1`,label:'公开类型甲'},{id:`${id}_2`,label:'公开类型乙'}]})),preferenceCatalogue:catalogue,termLabels,ownPreference:preference,milestones,ownStanding:standing,legalActions:[...cards.US,{id:'PASS',role:'US',name:'维持现状',description:'不改变指标'}],messages:[],deals:[],readyRoles:[],submittedRoles:[],messageCount:0,proposalsMade:0,reportHistory:[],notices:[],researchUses:0};
 const response=(data:unknown,status=200)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json'}});
+// The announcement stage needs the label maps the engine projects, otherwise the card can only show raw ids.
+const announcement:Snapshot={...base,phase:'announcement',declaredRoles:[],statements:{},issues:{controls:'技术出口管制',materials:'关键材料与供应链',licensing:'设备许可自主',enforcement:'执法与灰色渠道',commerce:'商业收益与市场'},tones:{dove:'合作',hawk:'强硬'},commitLevels:{signal:'看法',pledge:'预告',redline:'红线'}};
 let live:Snapshot;
 let fetcher:ReturnType<typeof vi.fn>;
 beforeEach(()=>{
-  sessionStorage.clear();localStorage.setItem('chip-guided-tour','done');localStorage.setItem(CONTEXT_INTRO_STORAGE_KEY,'done');live=structuredClone(base);
+  sessionStorage.clear();localStorage.setItem(CONTEXT_INTRO_STORAGE_KEY,'done');live=structuredClone(base);
   fetcher=vi.fn(async(input:string,options?:RequestInit)=>{
     if(input==='/api/health')return response({status:'ok',rulesVersion:'1.6',llm:{enabled:true,model:'deepseek-chat'}});
     if(input==='/api/diplomacy/sessions')return response({id:live.id,token:'test-session-token',snapshot:live});
     if(options?.method==='DELETE')return response({deleted:true});
     if(input.endsWith('/polish'))return response({candidate:'希望共同维护合法合作空间。'});
+    if(input.endsWith('/statement'))return response({statement:{issue:'licensing',tone:'dove',level:'pledge',target:'NL',text:'我方愿意就设备许可与各方保持沟通。'},reason:'落在设备许可议题，用愿意表示合作，属预告级。',drafted:false,source:'llm'});
     if(input.endsWith('/secretary'))return response({advice:{otherRequests:['对方希望交换行动'],possibleMotives:[{text:'可能偏重商业',uncertain:true}],relevantActions:['U2'],risks:['请先确认签约']}});
     if(options?.method==='POST')return response({...live,version:live.version+1});
     return response(live);
@@ -66,9 +69,9 @@ describe('V1.6 real-service interface',()=>{
       live={...live,phase:'actions',actionPreviews:[{actionId:'U1',summary:'基础管制情景',assumptions:['前提甲：其他方保持现状','前提乙：不是对方真实选择','前提丙：最终结果统一结算'],branches:[{label:'本方行动情景',state:{T:3.4,A:2,E:2,S:1,P:0},delta:{T:1.4,A:0,E:-1,S:0,P:0},delayed:[]}]}]};
       render(<App/>);await waitFor(()=>expect((screen.getByText('开始四回合博弈') as HTMLButtonElement).disabled).toBe(false));fireEvent.click(screen.getByText('开始四回合博弈'));
       const card=await screen.findByRole('button',{name:/收紧技术管制/});await waitFor(()=>expect((card as HTMLButtonElement).disabled).toBe(false));fireEvent.click(card);
-      const previewHeading=screen.getByRole('heading',{name:'本轮预计 · 条件化后果'});
+      const previewHeading=screen.getByRole('heading',{name:'这个措施会带来什么'});
       expect(scroll).toHaveBeenCalledWith({block:'start',behavior:'auto'});expect(scroll.mock.contexts.at(-1)).toBe(previewHeading);expect(document.activeElement).toBe(previewHeading);
-      expect(screen.getByText(/除分支明确列出的合作方外/)).toBeTruthy();const premises=screen.getByText('展开完整情景前提').closest('details')!;expect(premises.open).toBe(false);
+      expect(screen.getByText(/已行动者的措施按实际计入/)).toBeTruthy();const premises=screen.getByText('展开完整情景前提').closest('details')!;expect(premises.open).toBe(false);
       fireEvent.click(screen.getByText('展开完整情景前提'));expect(premises.open).toBe(true);expect(screen.getByText('前提乙：不是对方真实选择')).toBeTruthy();expect(screen.getByText('本方行动情景')).toBeTruthy();
       fireEvent.click(screen.getByRole('button',{name:'换一项措施'}));expect(scroll.mock.contexts.at(-1)).toBe(screen.getByRole('heading',{name:'可选措施'}));expect(card.getAttribute('aria-pressed')).toBe('true');fireEvent.click(card);expect(scroll.mock.contexts.at(-1)).toBe(previewHeading);expect(calls('/action')).toHaveLength(0);
     }finally{if(descriptor)Object.defineProperty(HTMLElement.prototype,'scrollIntoView',descriptor);else delete (HTMLElement.prototype as any).scrollIntoView;}
@@ -80,15 +83,15 @@ describe('V1.6 real-service interface',()=>{
       return original(url,options);
     });
     render(<App/>);await waitFor(()=>expect((screen.getByText('开始四回合博弈') as HTMLButtonElement).disabled).toBe(false));fireEvent.click(screen.getByText('开始四回合博弈'));
-    const card=await screen.findByRole('button',{name:/收紧技术管制/});await waitFor(()=>expect((card as HTMLButtonElement).disabled).toBe(false));fireEvent.click(card);fireEvent.click(screen.getByRole('button',{name:'秘密提交措施'}));
-    await screen.findByText(/你已秘密提交：收紧技术管制/);
+    const card=await screen.findByRole('button',{name:/收紧技术管制/});await waitFor(()=>expect((card as HTMLButtonElement).disabled).toBe(false));fireEvent.click(card);fireEvent.click(screen.getByRole('button',{name:'提交本方措施'}));
+    await screen.findByText(/你已提交：收紧技术管制/);
     expect(calls('/action').map(([,o])=>JSON.parse(o.body))).toEqual([{expectedVersion:1,actionId:'U1'},{expectedVersion:2,actionId:'U1'}]);expect(screen.queryByRole('alert')).toBeNull();
   });
   it('does not retry a secret action across a phase transition',async()=>{
     live={...live,phase:'actions'};const original=fetcher.getMockImplementation()!;
     fetcher.mockImplementation(async(url:string,options?:RequestInit)=>{if(url.endsWith('/action')){live={...live,version:2,phase:'report'};return response({error:'phase advanced'},409);}return original(url,options)});
     render(<App/>);await waitFor(()=>expect((screen.getByText('开始四回合博弈') as HTMLButtonElement).disabled).toBe(false));fireEvent.click(screen.getByText('开始四回合博弈'));
-    const card=await screen.findByRole('button',{name:/收紧技术管制/});await waitFor(()=>expect((card as HTMLButtonElement).disabled).toBe(false));fireEvent.click(card);fireEvent.click(screen.getByRole('button',{name:'秘密提交措施'}));
+    const card=await screen.findByRole('button',{name:/收紧技术管制/});await waitFor(()=>expect((card as HTMLButtonElement).disabled).toBe(false));fireEvent.click(card);fireEvent.click(screen.getByRole('button',{name:'提交本方措施'}));
     await screen.findByText(/局面已更新/);expect(calls('/action')).toHaveLength(1);expect(screen.getByRole('button',{name:'进入第 2 回合'})).toBeTruthy();
   });
   it('retries an unchanged pending invitation with the same explicit response',async()=>{
@@ -112,17 +115,33 @@ describe('V1.6 real-service interface',()=>{
     await start();const ready=screen.getByRole('button',{name:'结束磋商 · 就绪'});await waitFor(()=>expect((ready as HTMLButtonElement).disabled).toBe(false));fireEvent.click(ready);
     await screen.findByText(/局面已更新/);expect(calls('/ready').map(([,o])=>JSON.parse(o.body).expectedVersion)).toEqual([1,2]);
   });
-  it('shows a skippable first-visit tour without taking a game action',async()=>{
-    localStorage.removeItem('chip-guided-tour');await start();
-    expect(screen.getByRole('dialog',{name:'一分钟上手'})).toBeTruthy();
-    fireEvent.click(screen.getByText('下一步提示'));expect(screen.getByText('每个阶段只做一件事')).toBeTruthy();
-    fireEvent.click(screen.getByText('跳过引导'));expect(screen.queryByRole('dialog',{name:'一分钟上手'})).toBeNull();
-    expect(localStorage.getItem('chip-guided-tour')).toBe('done');expect(calls('/ready')).toHaveLength(0);expect(calls('/message')).toHaveLength(0);
+  it('shows a one-time role briefing after start and dismisses it without taking a game action',async()=>{
+    await start();
+    const briefing=screen.getByRole('dialog',{name:'你的角色与私人偏好'});
+    expect(briefing.textContent).toContain('你代表 美国政府');
+    expect(briefing.textContent).toContain('本局你抽到的私人偏好：安全优先');
+    expect(briefing.textContent).toContain('你的分数取决于：有效技术难度 50%');
+    expect(briefing.textContent).toContain('不改变你能做什么');
+    expect(briefing.textContent).toContain('胜利进度');
+    fireEvent.click(screen.getByText('进入第一回合'));
+    expect(screen.queryByRole('dialog',{name:'你的角色与私人偏好'})).toBeNull();
+    expect(calls('/ready')).toHaveLength(0);expect(calls('/message')).toHaveLength(0);
   });
-  it('puts own relative improvement before the phase task and hides global detail by default',async()=>{
-    await start();const mine=screen.getByRole('region',{name:'我的偏好与相对提升'});
-    expect(mine.textContent).toContain('相对提升 ΔU +0');expect(mine.textContent).toContain('门槛 0.1');
-    expect(mine.textContent).toContain('有效技术难度 · 权重 50%');
+  it('puts the victory progress strip before the phase task and moves weight detail into intel',async()=>{
+    await start();fireEvent.click(screen.getByText('进入第一回合'));
+    const mine=screen.getByRole('region',{name:'我的偏好与胜利进度'});
+    expect(mine.textContent).toContain('我的偏好：安全优先');
+    expect(mine.textContent).toContain('胜利进度 +0 / 胜利线 0.1');
+    expect(mine.textContent).toContain('还差 0.1 达到胜利线');
+    expect(mine.textContent).toContain('局面得分 0.54 → 0.54');
+    fireEvent.click(screen.getByRole('tab',{name:'情报'}));
+    expect(screen.getByText('我是谁 · 安全优先')).toBeTruthy();
+    expect(screen.getByText(/你的分数取决于：有效技术难度 50% ｜ 美荷协调 20% ｜ 美国低压力 20% ｜ 商业收益 10%/)).toBeTruthy();
+    // The intel panel no longer lists badges in-play; they are revealed when the game ends.
+    expect(screen.getByText(/将在游戏结束后揭晓/)).toBeTruthy();
+    // The intel panel itself should not carry badge rows; the situation drawer in the main column may
+    // still contain them as a collapsed rules reference, so scope the absence to the aside.
+    expect(document.querySelector('aside')?.textContent).not.toMatch(/小院高墙/);
     const situation=screen.getByText('局势详情 · 指标、角色、规则与历史').closest('details');expect(situation?.open).toBe(false);
     expect(screen.getByRole('button',{name:'结束磋商 · 就绪'})).toBeTruthy();expect(screen.queryByText('秘密提交措施')).toBeNull();
   });
@@ -137,8 +156,8 @@ describe('V1.6 real-service interface',()=>{
     live={...live,phase:'actions',actionPreviews:[{actionId:'U1',summary:'基础管制情景',assumptions:['其他方保持现状，不是已知选择'],branches:[{label:'本方行动',state:{T:3.4,A:2,E:2,S:1,P:0},delta:{T:1.4,A:0,E:-1,S:0,P:0},delayed:[]}]}]};
     render(<App/>);await waitFor(()=>expect((screen.getByText('开始四回合博弈') as HTMLButtonElement).disabled).toBe(false));fireEvent.click(screen.getByText('开始四回合博弈'));
     const card=await screen.findByRole('button',{name:/收紧技术管制/});await waitFor(()=>expect((card as HTMLButtonElement).disabled).toBe(false));fireEvent.click(card);
-    const preview=screen.getByRole('region',{name:'措施后果预览'});expect(preview.textContent).toContain('2 → 3.4');expect(preview.textContent).toContain('3 → 2');expect(preview.textContent).toContain('其他方本轮选择未知');
-    expect(screen.getByRole('button',{name:'秘密提交措施'})).toBeTruthy();expect(screen.queryByRole('textbox',{name:'谈判消息'})).toBeNull();
+    const preview=screen.getByRole('region',{name:'措施后果预览'});expect(preview.textContent).toContain('2 → 3.4');expect(preview.textContent).toContain('3 → 2');expect(preview.textContent).toContain('还没行动的按「维持现状」估算');
+    expect(screen.getByRole('button',{name:'提交本方措施'})).toBeTruthy();expect(screen.queryByRole('textbox',{name:'谈判消息'})).toBeNull();
   });
   it('automatically opens secretary once per round without blocking next-step or message input',async()=>{
     let release:(value:Response)=>void=()=>{};const original=fetcher.getMockImplementation()!;
@@ -158,7 +177,7 @@ describe('V1.6 real-service interface',()=>{
     await start();await waitFor(()=>expect(calls('/secretary')).toHaveLength(1));
     live={...live,version:2,phase:'signing',readyRoles:[]};
     fireEvent.click(screen.getByRole('button',{name:'结束磋商 · 就绪'}));
-    await screen.findByRole('heading',{name:'决定接受哪些安排'});
+    await screen.findByRole('heading',{name:'签，还是不签？——决定是否签署安排'});
     await act(async()=>release(response({error:'上一阶段已经失效'},503)));
     expect(screen.queryByRole('alert')).toBeNull();
     expect((screen.getByRole('button',{name:'结束安排 · 就绪'}) as HTMLButtonElement).disabled).toBe(false);
@@ -234,15 +253,29 @@ describe('V1.6 real-service interface',()=>{
     live={...live,phase:'actions',submittedRoles:['CN'],deals:[{id:'deal',round:1,proposer:'US',participants:['US','NL'],commitments:{US:'U2',NL:'N2'},text:'正式安排',accepted:['US','NL'],status:'effective'}]};
     render(<App/>);await waitFor(()=>expect((screen.getByText('开始四回合博弈') as HTMLButtonElement).disabled).toBe(false));fireEvent.click(screen.getByText('开始四回合博弈'));
     fireEvent.click(await screen.findByRole('button',{name:/收紧技术管制/}));await screen.findByText(/此措施与你在正式安排中的承诺不同/,{},{timeout:5000});
-    fireEvent.click(screen.getByText('秘密提交措施'));await waitFor(()=>expect(calls('/action')).toHaveLength(1));
+    fireEvent.click(screen.getByText('提交本方措施'));await waitFor(()=>expect(calls('/action')).toHaveLength(1));
     expect(JSON.parse(calls('/action')[0][1].body).actionId).toBe('U1');
     expect(screen.queryByText('C2 · 限制关键材料出口')).toBeNull();
   });
   it('labels secretary motives as guesses, showing explicit provider failure without fixtures',async()=>{
-    await start();fireEvent.click(screen.getByRole('tab',{name:'幕僚'}));fireEvent.click(screen.getByText('请秘书建议'));await screen.findByText('推测：可能偏重商业');
+    await start();fireEvent.click(screen.getByRole('tab',{name:'幕僚'}));fireEvent.click(screen.getByText('请幕僚建议'));await screen.findByText('推测：可能偏重商业');
     fetcher.mockResolvedValueOnce(response({error:'模型服务暂时不可用'},503));fireEvent.click(screen.getByText('AI 润色')); // Empty draft disables polish.
     fireEvent.change(screen.getByLabelText('谈判消息'),{target:{value:'合作'}});fireEvent.click(screen.getByText('AI 润色'));
     await screen.findByText(/AI 请求失败：模型服务暂时不可用/);expect((screen.getByLabelText('谈判消息') as HTMLTextAreaElement).value).toBe('合作');
+  });
+  it('flags auto-provided aide analysis as unread until the panel is opened',async()=>{
+    live={...live,readyRoles:['CN','NL','AS']};await start();
+    const unread=await screen.findByRole('tab',{name:'幕僚（新）'});
+    fireEvent.click(unread);await screen.findByText('推测：可能偏重商业');
+    await waitFor(()=>expect(screen.getByRole('tab',{name:'幕僚'})).toBeTruthy());
+  });
+  it('re-titles aide sections for signing and shows a signing hint',async()=>{
+    live={...live,phase:'signing'};
+    render(<App/>);await waitFor(()=>expect((screen.getByText('开始四回合博弈') as HTMLButtonElement).disabled).toBe(false));fireEvent.click(screen.getByText('开始四回合博弈'));
+    await screen.findByText(/签不签拿不准/);
+    fireEvent.click(screen.getByRole('tab',{name:'幕僚'}));fireEvent.click(screen.getByText('请幕僚分析'));
+    await screen.findByText('推测：可能偏重商业');
+    expect(screen.getByText('条款要点')).toBeTruthy();expect(screen.getByText('缔约动机 · 推测')).toBeTruthy();
   });
   it('restores a bearer session without creating another one',async()=>{
     sessionStorage.setItem('chip-diplomacy-v16-session',JSON.stringify({id:'one',token:'restore-token'}));render(<App/>);await screen.findByText('磋商发言');
@@ -268,12 +301,12 @@ describe('V1.6 real-service interface',()=>{
     live={...live,round:3,researchUses:2,roundStart:{...live.roundStart,A:4,P:1}};await start();
     const options=(name:string)=>Array.from((screen.getByLabelText(name) as HTMLSelectElement).options).map(option=>option.value);
     expect(options('中国政府协议承诺')).toEqual(['','C1','C2','C3','C4']);expect(options('荷兰政府协议承诺')).toEqual(['','N1','N3']);expect(options('ASML协议承诺')).toEqual(['','S1','S2']);
-    expect(screen.getByText(/偏好如何影响胜负/)).toBeTruthy();expect(screen.getByText(/不改变你能做什么/)).toBeTruthy();
+    expect(screen.getByText(/你的分数取决于/)).toBeTruthy();expect(screen.getByText(/第四回合末，胜利进度 ≥ 0.1/)).toBeTruthy();
   });
   it('explains ASML baseline risk, hidden policy decisions, and unavailable actions',async()=>{
     live=Object.assign({...live,playerRole:'AS' as const,phase:'actions' as const,legalActions:[...cards.AS,{id:'PASS' as const,role:'AS' as const,name:'维持现状',description:'不改变指标'}]}, {monitoring:true,ownGreyRisk:.6});
     render(<App/>);await waitFor(()=>expect((screen.getByText('开始四回合博弈') as HTMLButtonElement).disabled).toBe(false));fireEvent.click(screen.getByText('开始四回合博弈'));
-    await screen.findByRole('button',{name:/灰色渠道交付/});expect(screen.getByText(/你的基础查获风险 60%/)).toBeTruthy();expect(screen.getByText(/实际受本轮政策及协调变化影响/)).toBeTruthy();expect(screen.queryByRole('button',{name:/维护现有合规客户/})).toBeNull();
+    await screen.findByRole('button',{name:/灰色渠道交付/});expect(screen.getByText(/你的灰色交付当前查获风险约 60%/)).toBeTruthy();expect(screen.getByText(/会随本轮各方政策变化/)).toBeTruthy();expect(screen.queryByRole('button',{name:/维护现有合规客户/})).toBeNull();
   });
   it('polls authoritative server state and never invokes a browser step endpoint',async()=>{
     await start();live={...live,version:2,messageCount:2,readyRoles:['US']};
@@ -302,10 +335,50 @@ describe('V1.6 real-service interface',()=>{
   });
 });
 
+describe('stance card',()=>{
+  async function startAnnouncement(){live=structuredClone(announcement);render(<App/>);await waitFor(()=>expect((screen.getByText('开始四回合博弈') as HTMLButtonElement).disabled).toBe(false));fireEvent.click(screen.getByText('开始四回合博弈'));await screen.findByText('本轮公开表态')}
+  it('turns one plain sentence into an adjustable card and submits structured fields only',async()=>{
+    await startAnnouncement();
+    fireEvent.change(screen.getByLabelText(/用一句话说出你的立场/),{target:{value:'荷兰应保持自主，我们愿意谈'}});
+    fireEvent.click(screen.getByText('让幕僚判定并润色'));
+    await screen.findByText('幕僚判定卡');
+    expect(screen.getByText(/判定理由：落在设备许可议题/)).toBeTruthy();
+    expect(screen.getByText('设备许可自主')).toBeTruthy();
+    expect((screen.getByLabelText(/官方表态正文/) as HTMLTextAreaElement).value).toBe('我方愿意就设备许可与各方保持沟通。');
+    // The tags stay adjustable: opening the issue row rewrites the sentence for the new issue.
+    fireEvent.click(screen.getAllByText('改')[0]);fireEvent.click(screen.getByText('商业收益与市场'));
+    expect((screen.getByLabelText(/官方表态正文/) as HTMLTextAreaElement).value).toContain('商业收益与市场');
+    fireEvent.click(screen.getByText('发表宣示'));
+    await waitFor(()=>expect(calls('/declare')).toHaveLength(1));
+    const body=JSON.parse(calls('/declare')[0][1].body);
+    expect(Object.keys(body).sort()).toEqual(['expectedVersion','issue','level','target','text','tone']);
+    expect(body).toMatchObject({issue:'commerce',tone:'dove',level:'pledge',target:'NL'});
+  });
+  it('drafts a stance when the sentence is blank and offers another draft',async()=>{
+    await startAnnouncement();
+    fireEvent.click(screen.getByText('请幕僚代拟'));
+    await screen.findByText('幕僚判定卡');
+    expect(JSON.parse(calls('/statement')[0][1].body).text).toBe('');
+    fireEvent.click(screen.getByText('换一稿'));
+    await waitFor(()=>expect(calls('/statement')).toHaveLength(2));
+  });
+  it('offers silence when the aide cannot judge the sentence',async()=>{
+    const original=fetcher.getMockImplementation()!;
+    fetcher.mockImplementation(async(url:string,options?:RequestInit)=>url.endsWith('/statement')?response({error:'模型服务暂时不可用'},503):original(url,options));
+    await startAnnouncement();
+    fireEvent.change(screen.getByLabelText(/用一句话说出你的立场/),{target:{value:'荷兰应保持自主'}});
+    fireEvent.click(screen.getByText('让幕僚判定并润色'));
+    await screen.findByText(/幕僚未能判定/);
+    expect(screen.queryByText('幕僚判定卡')).toBeNull();
+    // The role intro overlay also mentions silence, so target the actionable button.
+    expect(screen.getAllByRole('button',{name:'保持静默'}).some(button=>!(button as HTMLButtonElement).disabled)).toBe(true);
+  });
+});
+
 describe('speech template panel',()=>{
   it('fills the draft with a sentence aligned to the chosen stance and measure',async()=>{
     await start();
-    fireEvent.click(screen.getByText('不会写？用模板组一句（措辞已对齐引擎识别词）'));
+    fireEvent.click(screen.getByText('不会写？用模板组一句'));
     fireEvent.click(screen.getByRole('button',{name:'愿意让步'}));
     const measure=screen.getByLabelText('模板措施') as HTMLSelectElement;
     const own=[...measure.options].map(o=>o.value);
@@ -316,7 +389,7 @@ describe('speech template panel',()=>{
   });
   it('filters request templates to other parties measures',async()=>{
     await start();
-    fireEvent.click(screen.getByText('不会写？用模板组一句（措辞已对齐引擎识别词）'));
+    fireEvent.click(screen.getByText('不会写？用模板组一句'));
     fireEvent.click(screen.getByRole('button',{name:'提出要求'}));
     const measure=screen.getByLabelText('模板措施') as HTMLSelectElement;
     const ids=[...measure.options].map(o=>o.value).filter(Boolean);
@@ -332,7 +405,7 @@ describe('speech template panel',()=>{
     fetcher.mockImplementation(async(url:string,options?:RequestInit)=>url.endsWith('/polish')
       ? (mode==='ok'?response({candidate:'关于有限放宽管制，我方愿意在互惠基础上作出相应安排。',source:'llm'}):response({error:'AI服务未成功返回有效建议，请稍后重试；未生成示例内容。'},503))
       : original(url,options));
-    fireEvent.click(screen.getByText('不会写？用模板组一句（措辞已对齐引擎识别词）'));
+    fireEvent.click(screen.getByText('不会写？用模板组一句'));
     fireEvent.click(screen.getByRole('button',{name:'愿意让步'}));
     fireEvent.change(screen.getByLabelText('模板措施'),{target:{value:'U2'}});
     fireEvent.click(screen.getByText('AI 改写为正式措辞'));

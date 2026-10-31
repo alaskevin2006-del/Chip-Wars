@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error Server-only module.
 import * as e from '../server/v1/engine.mjs';
-const roles = ['US', 'CN', 'NL', 'AS'] as const;
+const roles = ['US', 'NL', 'CN', 'AS'] as const;
 // A stance is not an action card: tests drive the announcement phase with explicit statements.
 const skipA = (s: any) => s.phase === 'announcement' ? roles.reduce((s, r) => Object.hasOwn(s.statements, r) ? s : e.declare(s, r, null), s) : s;
 const fresh = (seed = 1) => e.createGame({ US: 0, CN: 0, NL: 0, AS: 0 }, seed);
@@ -51,16 +51,16 @@ describe('V1.6 position statements (issue-level semi-commitment)', () => {
     const signal = e.declare(fresh(5), 'US', stance('controls', 'hawk', 'signal'));
     const pledge = e.declare(fresh(5), 'US', stance('controls', 'hawk', 'pledge'));
     const redline = e.declare(fresh(5), 'US', stance('controls', 'hawk', 'redline'));
-    expect(signal.publicBeliefs.US).toBe(.52);
-    expect(pledge.publicBeliefs.US).toBe(.54);
-    expect(redline.publicBeliefs.US).toBe(.56);
+    expect(signal.publicBeliefs.US).toBe(.51);
+    expect(pledge.publicBeliefs.US).toBe(.52);
+    expect(redline.publicBeliefs.US).toBe(.54);
   });
 
   it('naming a party sharpens the signal for them and dulls it for bystanders', () => {
     const s = e.declare(fresh(5), 'US', stance('controls', 'hawk', 'pledge', 'NL'));
     expect(s.beliefs.NL.US).toBeGreaterThan(s.beliefs.CN.US);
     expect(s.beliefs.CN.US).toBeLessThan(s.publicBeliefs.US);
-    expect(s.publicBeliefs.US).toBe(.54); // the shared record uses the unnamed baseline
+    expect(s.publicBeliefs.US).toBe(.52); // the shared record uses the unnamed baseline
   });
 
   it('silence emits no signal and carries no audience cost', () => {

@@ -10,3 +10,21 @@ artifacts/
 .tmp/
 .runtime/
 __pycache__/
+
+# WorkBuddy workspace artifacts
+.wbapp_*.genie
+.workbuddy/
+
+# Local calibration outputs (regenerable)
+ops/cal-*.json
+ops/cal-*.err
+ops/eval-out.json
+ops/cal-out.json
+
+# Local archives
+chip-diplomacy-*.zip
+
+# Ad-hoc debugging scripts in ops/
+ops/tmp-*.mjs
+ops/cal-err.txt
+ops/eval-err.txt

@@ -161,3 +161,15 @@ Final server audit: correct release/active service; daily cap remainsInfinity; r
 - UI：立场面板（自由输入 + 议题/姿态/强度/点名模板 + 官方表态正文可编辑）、战报语义一致性区块
 - 测试：tests/v16-statements.test.ts 18 项取代 v16-announce；既有 v16/guided 套件适配新接口
 - 验证：266/266 测试、typecheck、build 通过；端到端冒烟确认玩家自由输入被判定为 licensing/dove/signal/点名荷兰，三方 NPC 由模型生成各自风格辞令，新闻快讯由模型改写且拒收数字
+
+## 2026-11-01 序贯行动窗口与滚动数据传导
+
+用户反馈：四方同时密封提交不合理——中国根据荷兰的实际行动协调、ASML 根据许可是否真实落地决定订单。改为严格 US→NL→CN→AS 逐窗序贯行动：
+
+- engine.mjs：ACTION_ORDER=['US','NL','CN','AS']，currentActor() 返回第一个未提交方；submitAction 强制窗口序；applyWindow 逐窗实时结算，windowStart 为后手 σ 与合法性判定基准（N2 需 A<4、C4 需 P≥1 按窗口开启位置判——US U2 先落地会使 CN 的 C4 失去条件，属序贯正确语义）；windowTrail 留痕；advanceRound 重置窗口
+- 信念/预览：后手窗口 σ 已计入先手落地措施，似然数值随之漂移；previewAction 纯反事实，已落地措施按事实计入、AS 永远最后行动且不公开，任何非 AS 预览过滤 AS 选择
+- 修复两处真实缺陷：applyWindow 结算路径漏传 finalRound（终局查获 S4_FINAL 处罚此前永不落地）；previewAction 未把注入的 AS 行动从 base 中剔除
+- UI：行动阶段顶部显示行动序（已行动方标注已落地措施、当前窗口方高亮），预览标题改为「这个措施会带来什么」并注明已行动者按实际计入、未行动者按维持现状估算
+- 测试迁移：v16-engine withState 补 windowStart、观察测试按序提交、N2/C4 断言改为窗口位置语义；v16-beliefs 数值按诊断脚本核验不变量后更新；v16-engine-guidance 预览/快照断言按"先手落地=合法事实、后手选择=不得泄露"重新分类；v1-ui 4 处预览/签约文案对齐
+- 校准（#33）：ops/v16-calibrate.mjs 提交顺序改按 ACTION_ORDER（原按 ROLE_IDS 会撞窗口序）；128 局×16 类型组合重跑，δ=0.10 维持不变——deals 模式下八类型实质胜率 0.17–0.55（无自动胜利/无不可能），无 deals 模式 0.03–0.59
+- 验证：全量 300/300 测试、tsc --noEmit、vite build 均通过；清理本会话临时诊断脚本（ops-tmp/、ops/tmp-seq.mjs）

@@ -1,13 +1,13 @@
 import {describe,it,expect} from 'vitest';
 // @ts-expect-error Server-only module.
 import * as e from '../server/v1/engine.mjs';
-const roles=['US','CN','NL','AS'];
+const roles=['US','NL','CN','AS'];
 const skipA=(s:any)=>s.phase==='announcement'?roles.reduce((s,r)=>e.declare(s,r,null),s):s;
 const initial=(seed=1)=>skipA(e.createGame({US:0,CN:0,NL:0,AS:0},seed));
 const ready=(s:any)=>roles.reduce((s,r)=>e.ready(s,r),s);
 const actions=(s:any)=>{s=skipA(s);while(['negotiation','signing'].includes(s.phase))s=ready(s);return s;};
 const run=(s:any,chosen:any={})=>roles.reduce((s,r)=>e.submitAction(s,r,chosen[r]||'PASS'),actions(s));
-const withState=(s:any,state:any)=>({...s,state:{...s.state,...state},roundStart:{...s.roundStart,...state}});
+const withState=(s:any,state:any)=>({...s,state:{...s.state,...state},roundStart:{...s.roundStart,...state},windowStart:{...(s.windowStart??s.state),...state}});
 const ids=(s:any,r:string)=>e.legalActions(s,r).map((a:any)=>a.id);
 const find=(caught:boolean,setup=(s:any)=>s)=>{for(let seed=0;seed<1000;seed++){const s=run(setup(initial(seed)),{AS:'S4'});if(s.randomRecords[0].caught===caught)return s;}throw Error('seed not found');};
 describe('V1.6 exact effects and stable random settlement',()=>{
@@ -24,11 +24,15 @@ describe('V1.6 exact effects and stable random settlement',()=>{
   let s=initial();for(let round=1;round<=3;round++){s=run(s,{CN:'C1'});expect(s.state.S).toBe(round);expect(s.state.E).toBe(3-round*.5);s=e.advanceRound(s);expect(s.state.S).toBe(round+1);}
   expect(s.researchUses).toBe(3);expect(ids(s,'CN')).not.toContain('C1');expect(()=>e.submitAction(actions(s),'CN','C1')).toThrow();
  });
- it('checks N2/C4 eligibility strictly from roundStart and P combines once',()=>{
+ it('checks N2/C4 eligibility against the window position and P combines once',()=>{
   const s=withState(initial(),{A:4,P:0});expect(ids(s,'NL')).not.toContain('N2');expect(ids(s,'CN')).not.toContain('C4');
   const next=run(s,{CN:'C3'});expect(next.state.A).toBe(3);expect(()=>e.submitAction(actions(s),'NL','N2')).toThrow();
   const pressure=run(withState(initial(),{P:1}),{US:'U2',CN:'C2'});expect(pressure.state.P).toBe(1);
-  const relief=run(withState(initial(),{P:1}),{US:'U2',CN:'C4'});expect(relief.state.P).toBe(0);
+  // With pressure standing, C4 is available and takes P to the floor in one clamp.
+  expect(run(withState(initial(),{P:1}),{CN:'C4'}).state.P).toBe(0);
+  // But once US relief (U2) has landed, CN's window opens on P=0 and there is nothing to relax.
+  let relieved=actions(withState(initial(),{P:1}));relieved=e.submitAction(relieved,'US','U2');
+  expect(relieved.state.P).toBe(0);expect(ids(relieved,'CN')).not.toContain('C4');
  });
  it('uses roundStart leverage/buffer, sums before rounding and clamps just once',()=>{
   const s=run(withState(initial(),{T:4.9,A:2.5,E:4.9,S:3,P:1}),{US:'U1',NL:'N1',CN:'C3',AS:'S2'});
@@ -97,7 +101,9 @@ describe('V1.6 private views, atomic agreements, victory and fallback',()=>{
   const changed={...s,seed:222,roundSeed:999,actions:{CN:'C2',AS:'S4'},prefs:{...s.prefs,CN:e.PREFERENCE_CATALOGUE.CN[1]}};expect(e.chooseFallbackAction(changed,'US')).toBe(first);
   s=e.proposeDeal(s,'US',{commitments:{US:'U2',NL:'N2'},text:''});s=ready(s);s=e.respondDeal(s,'NL',{dealId:'d1',accept:true});s=ready(s);expect(e.chooseFallbackAction(s,'US')).toBe('U2');s=e.submitAction(s,'US','U2','fallback');expect(s.actionSources.US).toBe('fallback');
  });
- it('every projected role observation contains only own actual preference and no current opponents actions',()=>{
-  let s=actions(initial());s=e.submitAction(s,'AS','S4');for(const role of roles){const p=e.getObservation(s,role);expect(p.ownPreference.role).toBe(role);expect(p.preferenceCatalogue[role].map((x:any)=>x.id)).toContain(p.ownPreference.id);expect(p.goals).toBeUndefined();expect(p.revealedPreferences).toBeUndefined();expect(p.prefs).toBeUndefined();expect(p.actions).toBeUndefined();expect(p.randomRecords).toBeUndefined();expect(p.rules.version).toBe('1.6');if(role!=='AS')expect(p.ownAction).toBeUndefined();}
+ it('every projected role observation contains only own actual preference and no un-acted opponents actions',()=>{
+  // Sequential windows: US and NL have already moved (public facts), CN and AS are still to act.
+  let s=actions(initial());s=e.submitAction(s,'US','PASS');s=e.submitAction(s,'NL','PASS');
+  for(const role of roles){const p=e.getObservation(s,role);expect(p.ownPreference.role).toBe(role);expect(p.preferenceCatalogue[role].map((x:any)=>x.id)).toContain(p.ownPreference.id);expect(p.goals).toBeUndefined();expect(p.revealedPreferences).toBeUndefined();expect(p.prefs).toBeUndefined();expect(p.actions).toBeUndefined();expect(p.randomRecords).toBeUndefined();expect(p.rules.version).toBe('1.6');expect(p.publicActions).toEqual({US:'PASS',NL:'PASS'});if(!['US','NL'].includes(role))expect(p.ownAction).toBeUndefined();}
  });
 });

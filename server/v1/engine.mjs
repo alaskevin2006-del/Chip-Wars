@@ -14,6 +14,10 @@ import {
 } from './preferences.mjs';
 export { PREFERENCE_CATALOGUE, MILESTONES, DELTA_THRESHOLD, TERM_LABELS, effectiveT, evaluate };
 export const ROLE_IDS = freeze(['US', 'CN', 'NL', 'AS']);
+// Measures do not land together. Washington announces first, The Hague decides the licence on what
+// it just saw, Beijing coordinates only once the Dutch position exists, and ASML books orders last.
+// This is the order of the four windows, and it is also the order in which facts become public.
+export const ACTION_ORDER = freeze(['US', 'NL', 'CN', 'AS']);
 const METRICS = ['T', 'A', 'E', 'S', 'P'];
 const METRIC_NAMES = freeze({ T: '先进技术获取难度', A: '美荷政策协调度', E: '整体商业收益', S: '中国技术自主能力', P: '美国国内产业压力' });
 const clamp = (n, max = 5) => Math.max(0, Math.min(max, n));
@@ -79,11 +83,14 @@ export const TONES = freeze({ dove: '合作姿态', hawk: '强硬姿态', neutra
 const LEVEL_WEIGHT = freeze({ signal: .6, pledge: 1, redline: 1.4 });
 const LEVEL_RISK = freeze({ signal: .2, pledge: .5, redline: .9 }); // Contradiction penalty [G].
 const LEVEL_CRED_PENALTY = freeze({ signal: .15, pledge: .3, redline: .45 });
-// Each action lands on one issue with one tone; PASS and diversifying moves carry no stance.
+// Each action lands on one issue with one tone; PASS, diversifying and coordination moves carry no
+// stance: U3/N3 are about *whether the allies act together*, not about the level of controls, so
+// counting them as controls-hawk let the coordination-minded type masquerade as the hawk type and
+// drowned the statement signal.
 const ACTION_STANCE = freeze({
-  U1: ['controls', 'hawk'], U2: ['controls', 'dove'], U3: ['controls', 'hawk'], U4: ['enforcement', 'hawk'],
+  U1: ['controls', 'hawk'], U2: ['controls', 'dove'], U4: ['enforcement', 'hawk'],
   C1: ['controls', 'hawk'], C2: ['materials', 'hawk'], C3: ['commerce', 'dove'], C4: ['materials', 'dove'],
-  N1: ['licensing', 'hawk'], N2: ['licensing', 'dove'], N3: ['controls', 'hawk'],
+  N1: ['licensing', 'hawk'], N2: ['licensing', 'dove'],
   S1: ['commerce', 'dove'], S2: ['commerce', 'neutral'], S4: ['enforcement', 'hawk'],
 });
 export function actionStance(actionId) { return ACTION_STANCE[actionId] || [null, 'neutral']; }
@@ -153,6 +160,10 @@ export function createGame(draws,seed=1) {
     prefs: Object.fromEntries(ROLE_IDS.map(role => [role, copy(PREFERENCE_CATALOGUE[role][draws[role]])])),
     draws: copy(draws),
     seed,roundSeed:roundSeed(seed,1),randomRecords:[],pendingPenalties:[],monitoring:false,
+    // Sequential windows: windowStart is the position the role now on stage is looking at, and
+    // roundEffects is the running ledger every window appends to. Nothing is applied twice.
+    windowStart: copy(state), windowTrail: [], roundEffects: [],
+    backlash: false, caught: false, u3Roll: null, greyRoll: null, greyProbability: null,
     pendingResearch: [], researchUses: 0, credit: record(1), fulfilledDeals: record(0),
     beliefs: initialBeliefs(), publicBeliefs: record(.5), beliefLog: [],
     announcements: {}, announceSources: {}, announceCred: record(1),
@@ -208,9 +219,12 @@ export function chooseFallbackStatement(game, role) {
   return { issue, tone, level, target: null, text: templateStatement(role, issue, tone, level, null) };
 }
 
+// Eligibility is read off the position the role is looking at when its own window opens, so a
+// measure the US has just landed can legitimately take a Chinese option off the table.
 export function legalActions(game, role) {
   validRole(role);
-  return copy(ACTIONS[role].filter(action => (action.id !== 'C1' || (game.round < 4 && game.researchUses < 3)) && (action.id !== 'C4' || game.roundStart.P>=1) && (action.id !== 'N2' || game.roundStart.A<4)));
+  const state = game.windowStart ?? game.roundStart ?? game.state;
+  return copy(ACTIONS[role].filter(action => (action.id !== 'C1' || (game.round < 4 && game.researchUses < 3)) && (action.id !== 'C4' || state.P>=1) && (action.id !== 'N2' || state.A<4)));
 }
 const isLegal = (game, role, actionId) => legalActions(game, role).some(action => action.id === actionId);
 const requireStage = (game, phase, role) => {
@@ -326,62 +340,130 @@ export function ready(game, role) {
   return next;
 }
 
-export function submitAction(game, role, actionId, source = 'player') {
-  validRole(role);
-  if (!['player', 'llm', 'timeout','fallback'].includes(source)) fail('行动来源无效。');
-  if (game.phase !== 'actions') fail('当前阶段不能提交行动。');
-  if (!isLegal(game, role, actionId)) fail('请选择本回合合法行动。');
-  if (has(game.actions, role)) {
-    if (game.actions[role] === actionId) return game;
-    fail('行动已秘密提交，不可更改。');
+// The window that is open right now. Windows are not interchangeable: only one role may move, and
+// the others are not guessing — they are waiting for a fact.
+export function currentActor(game) {
+  if (game.phase !== 'actions') return null;
+  return ACTION_ORDER.find(role => !has(game.actions, role)) ?? null;
+}
+// σ for one role at one position. Earlier windows are already facts for this role, so its strategy
+// conditions on them; the composition base stays the round's own start, so a folded branch never
+// counts a landed effect twice. ASML's move is never pinned for anyone: it books last.
+function roleModel(game, role, state, observed) {
+  const view = { ...game, state, windowStart: state, actions: { ...observed },
+    deals: game.deals.map(deal => ({ ...deal, commitments: {} })) };
+  return { [role]: actionStrategy(view, role, predictBackground(view, role, game.publicBeliefs ?? {})) };
+}
+// One window settles on its own. Everything a later mover needs — the position it faces, the
+// measures already on the table, and the belief update those measures produced — is live before it
+// decides. That is the whole point of ordering the game this way.
+function applyWindow(next, role, actionId, source) {
+  const start = next.roundStart, observed = { ...next.actions };
+  // Likelihood is read at the position this window opened on, before its own effects land.
+  const model = roleModel(next, role, next.windowStart, observed);
+  // A coordination bid is answered — or not — in The Hague's window, never at settlement.
+  if (role === 'NL' && observed.US === 'U3' && actionId !== 'N3') { next.u3Roll = roll(next.roundSeed, 0x12345); next.backlash = next.u3Roll < .3; }
+  // ASML moves last, so it prices interception against measures it can already see.
+  if (role === 'AS') {
+    next.greyProbability = chance(start, { ...observed, AS: actionId }, next.backlash, next.monitoring);
+    if (actionId === 'S4') { next.greyRoll = roll(next.roundSeed, 0xabcde); next.caught = next.greyRoll < next.greyProbability; }
   }
-  const next = copy(game);
   next.actions[role] = actionId;
   next.actionSources[role] = source;
+  const parts = contributions(role, { ...observed, [role]: actionId, finalRound: next.round === 4 }, { start, backlash: next.backlash, caught: next.caught });
+  if (parts.length) {
+    for (const part of parts) next.roundEffects.push({ role, ...part });
+    next.state = stateAfter(start, next.roundEffects);
+  }
+  if (actionId === 'C1') { next.pendingResearch.push({ dueRound: next.round + 1, amount: 1 }); next.researchUses++; }
+  if (next.caught && next.round < 4) next.pendingPenalties.push({ dueRound: next.round + 1, amount: 1 });
+  // A measure is public unless it is ASML's; the company's hand shows only when it is caught.
+  if (role !== 'AS' || next.caught)
+    emitSignal(next, role, actionSignal(model, role, actionId), publicObservers(role), `${ROLE_INFO[role][0]}${ACTIONS[role].find(c => c.id === actionId)?.name || actionId}`, true);
+  next.windowTrail.push({ role, action: actionId, state: copy(next.state), sigma: model[role] });
+  next.windowStart = copy(next.state);
+}
+export function submitAction(game, role, actionId, source = 'player') {
+  validRole(role);
+  if (!['player', 'llm', 'timeout', 'fallback'].includes(source)) fail('行动来源无效。');
+  if (game.phase !== 'actions') fail('当前阶段不能提交行动。');
+  const actor = currentActor(game);
+  if (!actor) fail('本回合行动已全部完成。');
+  if (role !== actor) fail(`当前是${ROLE_INFO[actor][0]}的行动窗口，请等待其措施公开。`);
+  if (has(game.actions, role)) fail('本回合已提交过行动。');
+  if (!isLegal(game, role, actionId)) fail('请选择本回合合法行动。');
+  const next = copy(game);
+  applyWindow(next, role, actionId, source);
   next.version++;
-  return ROLE_IDS.every(p => has(next.actions, p)) ? settle(next) : next;
+  return ROLE_IDS.every(p => has(next.actions, p)) ? closeRound(next) : next;
 }
 
-// Integer hundredths preserve simultaneous effects until the single final rounding.
+// Integer hundredths preserve each window's effect until the single final rounding. Because windows
+// land one at a time, the running position has to be re-derived from every effect landed so far.
 const normalize = (key,n) => key==='P' ? clamp(Math.round(n),2) : clamp(Math.floor((Math.round(n*100)+5)/10)/10);
 function mix(seed) {let x=seed>>>0;x=Math.imul(x^(x>>>16),0x7feb352d);x=Math.imul(x^(x>>>15),0x846ca68b);return (x^(x>>>16))>>>0;}
 const roundSeed = (seed,round) => mix(seed^Math.imul(round,0x9e3779b9));
 const roll = (seed,lane) => mix(seed^lane)/4294967296;
-function outcome(start,a,backlash,caught) {
- const hundredths=Object.fromEntries(METRICS.map(k=>[k,0])),effects=[];
- const add=(rule,description,delta,privateAS=false)=>{const exact=Object.fromEntries(Object.entries(delta).map(([k,v])=>[k,Math.round(v*100)/100]));effects.push({rule,description,delta:exact,privateAS});for(const k of METRICS)hundredths[k]+=Math.round((exact[k]||0)*100);};
- const leverage=1+start.A/5,baseCost=start.S>=3?-.5:-1;
- if(a.US==='U1')add('U1',`美国收紧管制：轮初协调度${start.A}，技术难度增加${Number(leverage.toFixed(2))}；轮初自主能力${start.S}，基础商业成本${-baseCost}；轮初国内压力${start.P}，${start.P>=1?'另增加0.5商业成本':'未增加材料压力成本'}。`,{T:leverage,E:baseCost-(start.P>=1?.5:0)});
- if(a.US==='U2')add('U2','美国有限放宽，商业预期缓和降低国内压力；不表示中国解除材料限制。',{T:-1,E:1,P:-1});
- if(a.US==='U3') {add('U3','美国争取协调，付出商业成本。',{E:-.4});if(a.NL==='N3')add('U3+N3','美荷协调联动一次。',{A:2});else add('U3_RANDOM',backlash?'美方协调未获配合，随机反噬。':'美方协调未获配合，本轮没有反噬。',backlash?{A:-1}:{});}
- if(a.US==='U4')add('U4','美国加强合规执法，查获概率额外提高30个百分点。',{E:-.2});
- if(a.CN==='C1')add('C1','中国投资研发；本轮商业成本，下一回合开始自主能力提高。',{E:-.5});
- if(a.CN==='C2')add('C2','中国限制对美关键材料出口，提高美国压力，不直接改变技术获取难度。',{P:1,E:-.5});
- if(a.CN==='C3'){add('C3','中国提出中荷商业合作。',{A:-1,E:.4});if(a.NL==='N2')add('C3+N2','中荷商业合作与有限许可联动。',{E:.5});}
- if(a.CN==='C4')add('C4','中国放松关键材料限制。',{P:-1,E:.5});
- if(a.NL==='N1')add('N1','荷兰收紧设备许可；同盟杠杆及研发缓冲按回合开始值计算。',{T:leverage,A:1,E:baseCost});
- if(a.NL==='N2')add('N2','荷兰批准有限许可，协调度下降。',{A:-1});
- if(a.AS==='S1')add('N2+S1',a.NL==='N2'?'有限许可与合规订单联动一次。':'缺少当轮有限许可，订单未执行，发生准备成本。',a.NL==='N2'?{T:-1,E:1}:{E:-1},true);
- if(a.AS==='S2')add('S2','ASML开拓其他市场；技术难度上升不受杠杆放大。',{E:.5,T:1},true);
- if(a.AS==='S4') {add('S4',caught?'灰色交付被查获；商业损失、信用处罚及延迟技术处罚。':'灰色交付未被查获。',caught?{E:-2}:{T:-1,E:1.5},true);if(caught&&a.finalRound)add('S4_FINAL','终局查获的技术处罚在最终判胜前执行。',{T:1},true);if(caught&&a.US==='U4')add('U4_CAUGHT','合规执法查获灰色交付，协调度提高。',{A:.5});}
- const delta=Object.fromEntries(METRICS.map(k=>[k,hundredths[k]/100]));
- return {delta,effects,state:Object.fromEntries(METRICS.map(k=>[k,normalize(k,start[k]+delta[k])]))};
+const exactDelta = delta=>Object.fromEntries(Object.entries(delta).map(([k,v])=>[k,Math.round(v*100)/100]));
+function aggregate(effects) {
+ const hundredths=Object.fromEntries(METRICS.map(k=>[k,0]));
+ for(const effect of effects)for(const k of METRICS)hundredths[k]+=Math.round((effect.delta[k]||0)*100);
+ return Object.fromEntries(METRICS.map(k=>[k,hundredths[k]/100]));
+}
+const stateAfter=(start,effects)=>Object.fromEntries(METRICS.map(k=>[k,normalize(k,start[k]+aggregate(effects)[k])]));
+// What one window's measure does, given the measures already on the table. Every coupling in this
+// game is read off an *observed* move: the Dutch answer to a US coordination bid, the Chinese offer
+// once a licence exists, the order ASML books once the licence is real. None of it is guessed, and
+// none of it can be triggered by a move that has not happened yet.
+function contributions(role,a,ctx) {
+ const start=ctx.start,list=[];
+ const add=(rule,description,delta,privateAS=false)=>list.push({rule,description,delta:exactDelta(delta),privateAS});
+ const leverage=1+start.A/5,baseCost=start.S>=3?-.5:-1,cardId=a[role];
+ if(role==='US') {
+  if(cardId==='U1')add('U1',`美国收紧管制：窗口开始协调度${start.A}，技术难度增加${Number(leverage.toFixed(2))}；窗口开始自主能力${start.S}，基础商业成本${-baseCost}；窗口开始国内压力${start.P}，${start.P>=1?'另增加0.5商业成本':'未增加材料压力成本'}。`,{T:leverage,E:baseCost-(start.P>=1?.5:0)});
+  if(cardId==='U2')add('U2','美国有限放宽，商业预期缓和降低国内压力；不表示中国解除材料限制。',{T:-1,E:1,P:-1});
+  // The bid costs money on its own. Whether anybody answers it is settled in The Hague's window.
+  if(cardId==='U3')add('U3','美国争取协调，付出商业成本；荷兰是否配合在其后的窗口决定。',{E:-.4});
+  if(cardId==='U4')add('U4','美国加强合规执法，查获概率额外提高30个百分点。',{E:-.2});
+ }
+ if(role==='NL') {
+  if(cardId==='N1')add('N1','荷兰收紧设备许可；同盟杠杆及研发缓冲按窗口开始值计算。',{T:leverage,A:1,E:baseCost});
+  if(cardId==='N2')add('N2','荷兰批准有限许可，协调度下降；ASML是否接单在其后的窗口决定。',{A:-1});
+  if(a.US==='U3') {
+   if(cardId==='N3')add('U3+N3','美荷协调联动：美方已公开争取协调，荷兰配合，协调度提高2。',{A:2});
+   else add('U3_RANDOM',ctx.backlash?'美方协调未获荷兰配合，随机反噬，协调度下降1。':'美方协调未获荷兰配合，本轮没有反噬。',ctx.backlash?{A:-1}:{});
+  }
+ }
+ if(role==='CN') {
+  if(cardId==='C1')add('C1','中国投资研发；本轮商业成本，下一回合开始自主能力提高。',{E:-.5});
+  if(cardId==='C2')add('C2','中国限制对美关键材料出口，提高美国压力，不直接改变技术获取难度。',{P:1,E:-.5});
+  if(cardId==='C3'){add('C3','中国提出中荷商业合作。',{A:-1,E:.4});if(a.NL==='N2')add('C3+N2','荷兰本轮已公开批准有限许可，中荷商业合作联动一次。',{E:.5});}
+  if(cardId==='C4')add('C4','中国放松关键材料限制。',{P:-1,E:.5});
+ }
+ if(role==='AS') {
+  if(cardId==='S1')add('N2+S1',a.NL==='N2'?'荷兰已公开批准有限许可，合规订单执行，联动一次。':'荷兰本轮未批准有限许可，订单未执行，发生准备成本。',a.NL==='N2'?{T:-1,E:1}:{E:-1},true);
+  if(cardId==='S2')add('S2','ASML开拓其他市场；技术难度上升不受杠杆放大。',{E:.5,T:1},true);
+  if(cardId==='S4'){add('S4',ctx.caught?'灰色交付被查获；商业损失、信用处罚及延迟技术处罚。':'灰色交付未被查获。',ctx.caught?{E:-2}:{T:-1,E:1.5},true);if(ctx.caught&&a.finalRound)add('S4_FINAL','终局查获的技术处罚在最终判胜前执行。',{T:1},true);if(ctx.caught&&a.US==='U4')add('U4_CAUGHT','合规执法查获灰色交付，协调度提高。',{A:.5});}
+ }
+ return list;
+}
+// Fold a complete set of four measures through the window order. Used by previews and by every
+// expected-utility calculation, so a branch is always priced the way the ledger will price it.
+function compose(start,a,backlash,caught) {
+ const effects=[];
+ for(const role of ACTION_ORDER)for(const part of contributions(role,a,{start,backlash,caught,finalRound:a.finalRound}))effects.push({role,...part});
+ return {delta:aggregate(effects),effects,state:stateAfter(start,effects)};
 }
 function chance(start,a,backlash,monitoring) {
  let tempA=start.A+(a.US==='U3'?(a.NL==='N3'?2:backlash?-1:0):0)+(a.CN==='C3'?-1:0)+(a.NL==='N1'?1:a.NL==='N2'?-1:0);
  tempA=clamp(tempA);return Math.min(1,(20+tempA*10+(a.US==='U4'?30:0)+(monitoring?20:0))/100);
 }
-function settle(next) {
- // Likelihoods are read off behaviour at the state the decision was taken on, before this round's
- // credit and arrangements have been applied — otherwise the move would be judged with its own后果.
- const model = signalModel(next);
- const a={...next.actions,finalRound:next.round===4},u3Roll=a.US==='U3'&&a.NL!=='N3'?roll(next.roundSeed,0x12345):null,greyRoll=a.AS==='S4'?roll(next.roundSeed,0xabcde):null;
- const backlash=a.US==='U3'&&a.NL!=='N3'&&u3Roll<.3;
- const probability=chance(next.roundStart,a,backlash,next.monitoring),caught=a.AS==='S4'&&greyRoll<probability;
- const result=outcome(next.roundStart,a,backlash,caught);next.state=result.state;
- if(a.CN==='C1'){next.pendingResearch.push({dueRound:next.round+1,amount:1});next.researchUses++;}
- if(caught&&next.round<4)next.pendingPenalties.push({dueRound:next.round+1,amount:1});
- const creditDelta=record(0);if(caught)creditDelta.AS--;
+// The last window closes the round. By now every measure has landed and every action signal has
+// been emitted at the position it was taken on, so what remains is bookkeeping: honouring
+// arrangements, credit, the conduct signals a signature produces, and the public record.
+function closeRound(next) {
+ const a={...next.actions,finalRound:next.round===4};
+ const creditDelta=record(0);if(next.caught)creditDelta.AS--;
  for(const deal of currentDeals(next)) {
   if(deal.status!=='effective')continue;
   deal.fulfillment=Object.fromEntries(deal.participants.map(r=>[r,a[r]===deal.commitments[r]]));
@@ -390,17 +472,16 @@ function settle(next) {
   deal.status=kept?'fulfilled':'breached';
  }
  for(const r of ROLE_IDS)next.credit[r]=clamp(next.credit[r]+creditDelta[r],2);
- if(caught&&next.credit.AS===0)next.monitoring=true;
- // Costly action signals: only actions visible in the public report update beliefs.
- // US/CN/NL actions are public; ASML stays hidden unless caught grey-channel delivery.
- for(const r of ['US','CN','NL'])
-  emitSignal(next,r,actionSignal(model,r,a[r]),publicObservers(r),`${ROLE_INFO[r][0]}${ACTIONS[r].find(c=>c.id===a[r])?.name||a[r]}`,true);
- if(caught)emitSignal(next,'AS',actionSignal(model,'AS','S4'),publicObservers('AS'),'ASML灰色交付被查获',true);
- // Deal conduct signals: participants see who kept or broke; bystanders only see the outcome.
- // Whether a signature was honoured is a move like any other, so its likelihood comes off the same σ.
+ if(next.caught&&next.credit.AS===0)next.monitoring=true;
+ // Deal conduct signals: each participant's likelihood is read off the σ it actually faced in its
+ // own window, stashed on the trail when it moved. Participants see who kept or broke; bystanders
+ // only see the outcome.
  for(const deal of currentDeals(next)) {
   if(!deal.fulfillment)continue;
   for(const p of deal.participants) {
+   const sigma=next.windowTrail.find(t=>t.role===p)?.sigma;
+   if(!sigma)continue;
+   const model={ [p]: sigma };
    const promised=actionSignal(model,p,deal.commitments[p]);
    const strong=deal.fulfillment[p]?promised:promised.map(l=>1-l);
    const weak=conductSignal(model,p,deal.fulfillment[p]);
@@ -426,19 +507,21 @@ function settle(next) {
   statementChecks.push({role:r,issue:statement.issue,tone:statement.tone,level:statement.level,target:statement.target,
    actual,actualIssue:issue,actualTone:tone,consistent,cred:next.statementCred[r]});
  }
- const randomRecord={round:next.round,seed:next.roundSeed,u3Roll,greyRoll,probability,backlash,caught};next.randomRecords.push(randomRecord);
+ const result={delta:aggregate(next.roundEffects),effects:copy(next.roundEffects),state:copy(next.state)};
+ const randomRecord={round:next.round,seed:next.roundSeed,u3Roll:next.u3Roll,greyRoll:next.greyRoll,probability:next.greyProbability,backlash:next.backlash,caught:next.caught};
+ next.randomRecords.push(randomRecord);
  const beliefShifts=next.beliefLog.filter(entry=>entry.round===next.round);
- next.reportHistory.push(copy({round:next.round,roundStart:next.roundStart,actions:next.actions,sources:next.actionSources,...result,deals:currentDeals(next),credit:next.credit,fulfilledDeals:next.fulfilledDeals,caught,randomRecord,beliefShifts,statementChecks,statements:copy(next.statements),claims:copy(next.claims),messages:copy(next.messages.filter(m=>m.round===next.round)),focusIssue:next.focusIssue,focusRole:next.focusRole}));
+ next.reportHistory.push(copy({round:next.round,roundStart:next.roundStart,actions:next.actions,sources:next.actionSources,...result,deals:currentDeals(next),credit:next.credit,fulfilledDeals:next.fulfilledDeals,caught:next.caught,randomRecord,beliefShifts,statementChecks,statements:copy(next.statements),claims:copy(next.claims),messages:copy(next.messages.filter(m=>m.round===next.round)),focusIssue:next.focusIssue,focusRole:next.focusRole}));
  next.phase=next.round===4?'finished':'report';return next;
 }
 
 export function resolveRound(game, round = game.round) {
   if (game.reportHistory.some(report => report.round === round)) return game;
   if (round !== game.round || game.phase !== 'actions') fail('当前回合无法结算。');
-  if (Object.keys(game.actions).length !== 4 || ROLE_IDS.some(role => !isLegal(game, role, game.actions[role]) || !['player', 'llm', 'timeout','fallback'].includes(game.actionSources[role]))) fail('须由四方提交合法行动后才能结算。');
+  if (ROLE_IDS.some(role => !has(game.actions, role) || !['player', 'llm', 'timeout','fallback'].includes(game.actionSources[role]))) fail('须由四方依次提交合法行动后才能结算。');
   const next = copy(game);
   next.version++;
-  return settle(next);
+  return closeRound(next);
 }
 
 export function advanceRound(game) {
@@ -452,6 +535,12 @@ export function advanceRound(game) {
   next.roundSeed=roundSeed(next.seed,next.round);
   next.pendingResearch = next.pendingResearch.filter(item => item.dueRound > next.round);
   next.roundStart = copy(next.state);
+  // A fresh round opens a fresh set of windows: no trail, no ledger, no resolved chance events.
+  next.windowStart = copy(next.state);
+  next.windowTrail = [];
+  next.roundEffects = [];
+  next.backlash = false; next.caught = false;
+  next.u3Roll = null; next.greyRoll = null; next.greyProbability = null;
   next.actions = {};
   next.actionSources = {};
   next.readyRoles = [];
@@ -530,6 +619,8 @@ export function getSnapshot(game,viewer) {
   legalActions:legalActions(game,viewer),messages:game.messages.filter(m=>m.to===null||m.from===viewer||m.to===viewer),deals:game.deals.map(d=>projectDeal(d,viewer,game)),
   claims:visibleClaims(game,viewer),claimKinds:CLAIM_KINDS,
   readyRoles:game.readyRoles,submittedRoles:ROLE_IDS.filter(r=>has(game.actions,r)),messageCount:game.messages.filter(m=>m.round===game.round&&m.from===viewer).length,proposalsMade:currentDeals(game).filter(d=>d.proposer===viewer).length,
+  actionOrder:ACTION_ORDER,currentActor:currentActor(game),
+  publicActions:Object.fromEntries(ROLE_IDS.filter(r=>has(game.actions,r)&&(r!=='AS'||game.caught)).map(r=>[r,game.actions[r]])),
   reportHistory:game.reportHistory.map(r=>projectReport(r,viewer)),pendingResearch:game.pendingResearch,researchUses:game.researchUses,monitoring:game.monitoring,pendingPenalties:game.pendingPenalties,
   actionPreviews:legalActions(game,viewer).map(card=>previewAction(game,viewer,card.id)),
   announcements:copy(game.announcements),announcedRoles:ROLE_IDS.filter(r=>has(game.announcements,r)),
@@ -539,7 +630,7 @@ export function getSnapshot(game,viewer) {
   issues:ISSUES,commitLevels:COMMIT_LEVELS,tones:TONES,
   focusIssue:game.focusIssue,focusRole:game.focusRole,
   beliefs:game.beliefs[viewer],ownImage:game.publicBeliefs[viewer]};
- if(viewer==='AS')snapshot.ownGreyRisk=Math.min(1,.2+game.roundStart.A*.1+(game.monitoring?.2:0));
+ if(viewer==='AS')snapshot.ownGreyRisk=Math.min(1,.2+(game.windowStart?.A??game.roundStart.A)*.1+(game.monitoring?.2:0));
  if(has(game.actions,viewer))snapshot.ownAction=game.actions[viewer];if(ownDeal)snapshot.signedDealId=ownDeal.id;
  if(game.phase==='finished') {
   snapshot.revealedPreferences=game.prefs;
@@ -551,13 +642,13 @@ export function getObservation(game,role) {
  const snapshot=getSnapshot(game,role);
  return {...snapshot,role:snapshot.roles.find(r=>r.id===role),actionCatalogue:copy(ACTIONS),rules:{version:'1.6',assumption:'所有数值是游戏假设，不构成现实政策预测。',
   metrics:{T:'先进技术获取难度，越高中国获取越难',A:'美荷政策协调度',E:'半导体整体商业收益，包括非中国市场',S:'中国技术自主能力',P:'美国国内产业压力；美国视为负面因素'},
-  settlement:'以roundStart决定资格和杠杆：仅U1/N1的T增量乘1+A/5；S≥3时各自基础E成本减为0.5，U1的P≥1额外0.5成本不减。所有效果合计，T/A/E/S统一四舍五入1位并截断0..5，P整数0..2。C1下回合S+1最多3次第4回合禁用；N2需开始A<4，C4需开始P≥1。',
-  risk:'查获概率=min(1,0.2+临时A*0.1+U4的0.3+此前重点监控0.2)。临时A包括确定性A变化和U3随机反噬，不含U4查获后A+0.5。U3无N3配合时30% A−1否则不变。S4查获信用−1、E−2、下回合T+1；第4回合在最终判胜前T+1。查获且合并协议处罚后的最终信用0触发永久重点监控一次。随机结果固定不可重抽。',
+  settlement:'行动按 美国→荷兰→中国→ASML 的窗口顺序逐个落地：每窗效果立即合计生效，先手的措施对后手公开（ASML的措施不公开，查获时除外），后手按自己窗口开始值判断资格。杠杆按轮初值计算：仅U1/N1的T增量乘1+轮初A/5；S≥3时各自基础E成本减为0.5，U1的P≥1额外0.5成本不减。T/A/E/S统一四舍五入1位并截断0..5，P整数0..2。C1下回合S+1最多3次第4回合禁用；N2需窗口开始A<4，C4需窗口开始P≥1。',
+  risk:'查获概率=min(1,0.2+临时A*0.1+U4的0.3+此前重点监控0.2)，在ASML窗口按轮初值与已落地行动估计。临时A包括确定性A变化和U3随机反噬，不含U4查获后A+0.5。U3未获N3配合时在荷兰窗口当场掷定：30% A−1否则不变。S4查获信用−1、E−2、下回合T+1；第4回合在最终判胜前T+1。查获且合并协议处罚后的最终信用0触发永久重点监控一次。随机结果固定不可重抽。',
   agreements:'每轮最多发起1份并参与1份生效协议，2至4方各承诺本轮合法非PASS非S4行动。最后接受时原子锁定，冲突作废。条款只对参与者可见；其他人只见参与方/是否达成/履约状态。允许违约，逐人信用±1，所有人履约才计fulfilledDeals。S4查获额外信用−1合并后截断0..2。',
-  privacy:'ASML历史行动默认未公开，仅查获S4公开；不可从effects/source/协议条款读取隐藏行动。私聊仅参与方可见。不得声称知道其他人抽中的偏好类型或本轮密封选择。',
-  victory:`第4回合末按「相对提升」判定：U=本方偏好权重对公开局势的加权评分+0.05×(信用−1)+0.05×全员履约协议数，实质胜利=ΔU（相对初始局势）≥${DELTA_THRESHOLD}且信用≥1；外交胜利=实质胜利且至少有1份全员履约协议。没有额外硬门槛，也不因角色而异：偏好只改变同一个局势对你值多少，不改变你能做什么。`,
+  privacy:'ASML历史行动默认未公开，仅查获S4公开；不可从effects/source/协议条款读取隐藏行动。私聊仅参与方可见。行动阶段各方按 美国→荷兰→中国→ASML 依次在自己的窗口提交并公开措施（ASML除外）；不得声称知道其他人抽中的偏好类型、未公开的行动或ASML的隐藏措施。',
+  victory:`第4回合末按「相对提升」判定：U=本方偏好权重对公开局势的加权评分+0.05×(信用−1)+0.05×全员履约协议数，实质胜利=ΔU（相对初始局势）≥胜利线且信用≥1；外交胜利=实质胜利且至少有1份全员履约协议。胜利线按角色分两档：主动方（美国/荷兰）0.12，被遏制方（中国/ASML）0.08——避免某一方因结构劣势而被卡死。偏好只改变同一个局势对你值多少，不改变你能做什么。`,
   preferences:'你抽到的是本方两种政策偏好之一（各50%），它是私有的，只改变你对局势的评价，不改变你的可选行动集——四方在同一局面下的合法行动完全相同。八张旧目标卡已降级为里程碑徽章，只作展示，不再决定胜负。',
-  signals:'每方对其他方持有偏好类型后验beliefs（0.05–0.95，初值0.5，指其抽中偏好目录中第1种的概率）；ownImage是所有人仅按公开信息对你的后验。似然不是写死的表，而是从行为策略σ(a|θ)读出来的：先按各类型对当前公开局势算期望效用，再做softmax得到它选各行动的概率，观测到某个行动就按该行动在该类型下的概率做贝叶斯更新；颤抖手混合把单次观测的证据强度限制在合理范围。公开宣示同理——一句话的分量来自它与发言者随后措施的关联，因此同一句话在不同局势下信息量不同。协议履约/违约也是同一套σ：参与者看得见谁违约（证据完整），旁观者只看得见结果（证据减半）。ASML未公开行动不产生信号，仅查获灰色交付时公开更新。无随机、可复现。你的言行同样改变他人对你的判断，他方决策会参考其信念。',
+  signals:'每方对其他方持有偏好类型后验beliefs（0.05–0.95，初值0.5，指其抽中偏好目录中第1种的概率）；ownImage是所有人仅按公开信息对你的后验。似然不是写死的表，而是从行为策略σ(a|θ)读出来的：先按各类型对当前公开局势算期望效用，再做softmax得到它选各行动的概率，观测到某个行动就按该行动在该类型下的概率做贝叶斯更新——行动窗口内，先手已公开的措施是后手决策与推断的既成事实；颤抖手混合把单次观测的证据强度限制在合理范围。公开宣示同理——一句话的分量来自它与发言者随后措施的关联，因此同一句话在不同局势下信息量不同。协议履约/违约也是同一套σ：参与者看得见谁违约（证据完整），旁观者只看得见结果（证据减半）。ASML未公开行动不产生信号，仅查获灰色交付时公开更新。无随机、可复现。你的言行同样改变他人对你的判断，他方决策会参考其信念。',
   announcements:'每轮先进入公开宣示阶段：美方先公开就某一议题发表宣示，其余三方观测后再各自表态，也可以保持静默。宣示是议题层面的公开姿态，不是措施卡——具体措施只在最后的实际措施阶段出现，所以同一个决策不会被做两遍。声明字段为议题（技术出口管制/关键材料与供应链/设备许可自主/执法与灰色渠道/商业收益与市场）、姿态（合作/强硬）、措辞强度（看法/预告/红线）与点名对象。措辞强度只表示这句话有多重，不构成任何义务；只有协议条款才是承诺。一份声明会去三个地方：一，按0.45×强度系数（看法0.6、预告1、红线1.4）×本人可信度更新所有听众对你的类型判断，点名对被点名方更强、对旁观者更弱；二，进入正式安排阶段的条款比对——协议条款若与某方就同一议题发表的公开立场相悖，其他代表会认为难以兑现并倾向拒绝，安排界面会标出这类冲突；三，结算时按语义与实际行动核对：在另一议题上行动或做出不具姿态的动作时不予核对，「看法」级别维持现状不算背离，「预告」与「红线」级别则算背离。一致则可信度+0.25（至多1），背离按强度扣减（看法0.15、预告0.3、红线0.45，下限0.25）。可信度只影响未来声明的信号权重，不影响指标与信用。',
   positions:'公开宣示会约束随后的闭门磋商：若一方的协议承诺与其就同一议题发表的立场相反，其他代表会认为该承诺难以兑现并降低接受意愿，红线级别的矛盾代价最大；言行可预测的一方更容易谈成协议。保持静默不构成任何义务，也没有观众成本。ASML的言行记录只对自己可见。',
   limits:'每方每回合最多2条100字消息、1份当轮协议提案；自由文本不改变数值或生成额外条款。'}};
@@ -571,7 +662,7 @@ function branchStates(game, a) {
   for (const [backlash, bw] of full.US === 'U3' && full.NL !== 'N3' ? [[false, .7], [true, .3]] : [[false, 1]]) {
     const p = chance(start, full, backlash, game.monitoring);
     for (const [caught, cw] of full.AS === 'S4' ? [[true, p], [false, 1 - p]] : [[false, 1]]) {
-      const state = { ...outcome(start, full, backlash, caught).state };
+      const state = { ...compose(start, full, backlash, caught).state };
       if (full.CN === 'C1' && game.round < 4) state.S = normalize('S', state.S + 1);
       // Being caught raises T next round, so a risky move has to be priced with its own penalty.
       if (full.AS === 'S4' && caught && game.round < 4) state.T = normalize('T', state.T + 1);
@@ -623,13 +714,14 @@ export function mixStrategy(strategy, pType0 = .5) {
   return Object.fromEntries(strategy.actions.map(id => [id,
     pType0 * strategy.sigma[strategy.types[0]][id] + (1 - pType0) * strategy.sigma[strategy.types[1]][id]]));
 }
-// Scenarios over the others' sealed moves. The two likeliest moves per role keep the product small
-// while retaining the mass that actually matters for the choice.
+// Scenarios over the others' moves that have not landed yet. A measure already on the table is a
+// fact with weight 1, so the product stays small and the uncertainty is only about the future.
 const SCENARIO_WIDTH = 2;
 export function scenarios(game, role, beliefs, background) {
   const beliefsOf = beliefs ?? {};
   let list = [{ a: { ...background }, weight: 1 }];
   for (const other of ROLE_IDS.filter(r => r !== role)) {
+    if (other !== 'AS' && has(game.actions, other)) continue;
     const dist = mixStrategy(actionStrategy(game, other, background), beliefsOf[other] ?? .5);
     const top = Object.entries(dist).sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0])).slice(0, SCENARIO_WIDTH);
     const mass = top.reduce((n, [, p]) => n + p, 0);
@@ -646,6 +738,9 @@ export function predictBackground(game, role, beliefs) {
   for (let pass = 0; pass < 2; pass++) {
     const next = { ...background };
     for (const other of ROLE_IDS.filter(r => r !== role)) {
+      // A measure that has already landed in an earlier window is a fact, not a forecast. Only
+      // public windows count: ASML's hand is pinned for nobody.
+      if (other !== 'AS' && has(game.actions, other)) { next[other] = game.actions[other]; continue; }
       const shared = currentDeals(game).find(d => d.status === 'effective' && has(d.commitments, role) && has(d.commitments, other));
       if (shared && isLegal(game, other, shared.commitments[other])) { next[other] = shared.commitments[other]; continue; }
       next[other] = Object.entries(mixStrategy(actionStrategy(game, other, background), beliefs?.[other] ?? .5))
@@ -723,13 +818,17 @@ export function stanceSignal(model, role, tone, issue = null) {
 const PREVIEW_SUMMARIES={U1:'提高技术限制，但会损失整体商业收益。',U2:'缓和技术限制并改善商业收益、降低美国压力。',U3:'争取荷兰配合；成功提升协调，未获配合可能适得其反。',U4:'付出小额商业成本，提高本轮查获灰色交付的可能。',C1:'牺牲部分当前收益，换取下一回合自主能力。',C2:'通过材料供应向美国施压；不会自动降低技术难度。',C3:'降低美荷协调、改善商业合作；荷兰许可可增加收益。',C4:'放松材料限制，缓解美国压力并改善商业收益。',N1:'提高技术限制和美荷协调，但会损失商业收益。',N2:'放宽许可；ASML配合交付才能取得订单收益。',N3:'配合美国争取协调；美国不配合时没有独立效果。',S1:'需要荷兰许可才能交付，缺少许可会损失准备成本。',S2:'通过其他市场增加商业收益，但会提高中国获取难度。',S4:'高收益、高风险；被查获会损失收益、信用并带来技术处罚。',PASS:'你不主动改变指标；其他角色仍可能改变局势。'};
 
 // Pure counterfactuals: never inspect selected actions, private opponent goals or seeded rolls.
+// Earlier windows are facts here — a preview starts from what has already landed, and only the
+// windows still to come are shown as branches.
 export function previewAction(game,role,actionId) {
  validRole(role);if(!isLegal(game,role,actionId))fail('该行动当前不可选，无法生成预览。');
- const base={...record('PASS'),[role]:actionId,finalRound:game.round===4};
+ // ASML books last and its hand is never public, so no preview may treat it as a landed fact.
+ const observed={...game.actions};if(role!=='AS')delete observed.AS;
+ const base={...record('PASS'),...observed,[role]:actionId,finalRound:game.round===4};
  const branches=[];
  const prefId=game.prefs[role].id;
  const add=(label,choices={},backlash=false,caught=false,probability)=>{
-  const a={...base,...choices},result=outcome(game.roundStart,a,backlash,caught),delayed=[];
+  const a={...base,...choices},result=compose(game.roundStart,a,backlash,caught),delayed=[];
   if(a.CN==='C1'&&game.round<4)delayed.push({metric:'S',amount:1,when:'下一回合开始'});
   if(a.AS==='S4'&&caught&&game.round<4)delayed.push({metric:'T',amount:1,when:'下一回合开始'});
   // Score the branch exactly the way the verdict will: the state once delayed effects have landed,
@@ -744,15 +843,20 @@ export function previewAction(game,role,actionId) {
   branch.fulfilledDelta=st.deals-game.fulfilledDeals[role];
   branches.push(branch);
  };
- if(actionId==='U3') {add('荷兰同时配合协调',{NL:'N3'});add('荷兰未配合：协调不变',{},false,false,.7);add('荷兰未配合：发生反噬',{},true,false,.3);}
+ const knows=(r,id)=>observed[r]===id;
+ if(actionId==='U3') {add('荷兰随后配合协调',{NL:'N3'});add('荷兰未配合：协调不变',{},false,false,.7);add('荷兰未配合：发生反噬',{},true,false,.3);}
  else if(actionId==='U4') {add('ASML未选择灰色交付');const a={...base,AS:'S4'},p=chance(game.roundStart,a,false,game.monitoring);add('假设ASML灰色交付：查获',{AS:'S4'},false,true,p);add('假设ASML灰色交付：未查获',{AS:'S4'},false,false,1-p);}
- else if(actionId==='N3') {add('美国同时争取荷兰协调',{US:'U3'});add('美国未配合：无独立效果');}
- else if(actionId==='N2') {add('ASML同时执行合规订单',{AS:'S1'});add('ASML没有执行合规订单');}
- else if(actionId==='S1') {if(isLegal(game,'NL','N2'))add('荷兰同时批准有限许可',{NL:'N2'});add('荷兰没有批准有限许可');}
- else if(actionId==='C3') {add('荷兰没有批准有限许可');if(isLegal(game,'NL','N2'))add('荷兰同时批准有限许可',{NL:'N2'});}
- else if(actionId==='S4') {const p=chance(game.roundStart,base,false,game.monitoring);add('查获（基础风险估计）',{},false,true,p);add('未查获（基础风险估计）',{},false,false,1-p);}
+ else if(actionId==='N3') {if(knows('US','U3'))add('美国已公开争取协调，配合联动生效');else add('美国本轮未争取协调：无独立效果');}
+ else if(actionId==='N2') {add('ASML随后执行合规订单',{AS:'S1'});add('ASML没有执行合规订单');}
+ else if(actionId==='S1') {if(knows('NL','N2'))add('荷兰已公开批准有限许可，合规订单执行');else add('荷兰本轮未批准有限许可，订单未执行，发生准备成本');}
+ else if(actionId==='C3') {if(knows('NL','N2'))add('荷兰已公开批准有限许可，中荷商业合作联动生效');else add('荷兰本轮未批准有限许可，无联动');}
+ else if(actionId==='S4') {const p=chance(game.roundStart,base,false,game.monitoring);add('查获（按已落地措施估计）',{},false,true,p);add('未查获（按已落地措施估计）',{},false,false,1-p);}
  else add('仅本方行动，其余保持现状');
- return copy({actionId,summary:PREVIEW_SUMMARIES[actionId],assumptions:['按本轮开始的公开状态估算；其他角色真实选择尚不可知。','除分支注明的假设行动外，其余角色均假设保持现状；合作分支包括双方效果。','预览不保证最终结果，实际结算还会合计所有角色行动并统一取位、截断。'],branches,...(['S4','U4'].includes(actionId)?{riskIsEstimate:true}:{})});
+ const landed=ROLE_IDS.filter(r=>has(observed,r)&&r!=='AS').map(r=>`${ROLE_INFO[r][0]}${ACTIONS[r].find(c=>c.id===observed[r])?.name||observed[r]}`);
+ return copy({actionId,summary:PREVIEW_SUMMARIES[actionId],assumptions:[
+  ...(landed.length?[`已按当前公开事实估算：${landed.join('；')}。`]:['按本轮开始的公开状态估算；尚未行动角色的真实选择不可知。']),
+  '除分支注明的假设行动外，尚未行动的角色均假设保持现状；合作分支包括双方效果。',
+  '预览不保证最终结果，实际结算还会合计所有角色行动并统一取位、截断。'],branches,...(['S4','U4'].includes(actionId)?{riskIsEstimate:true}:{})});
 }
 
 // A public stance that a pledged commitment contradicts makes the promise less credible, so the

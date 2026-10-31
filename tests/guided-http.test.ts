@@ -31,8 +31,9 @@ describe('actual signing failure recovery',()=>{
    await write('proposal',{commitments:{US:'U3',NL:'N3'},text:'本轮互相配合协调。'});await write('ready');
    for(let n=0;n<100;n++){s=(await req()).data;if(s.phase==='signing'&&s.readyRoles.includes('NL'))break;await pause(10);}
    expect(s.deals[0].status).toBe('effective');expect(s.deals[0].accepted).toContain('NL');expect(s.notices.some((n:any)=>n.task==='signing'&&n.message.includes('确定性接受或拒绝'))).toBe(true);
-   await write('ready');for(let n=0;n<100;n++){s=(await req()).data;if(s.phase==='actions'&&s.submittedRoles.length===3)break;await pause(10);}
-   await write('action',{actionId:'U3'});expect(s.phase).toBe('report');expect(s.reportHistory[0].actions.NL).toBe('N3');expect(s.reportHistory[0].sources.NL).toBe('fallback');expect(s.reportHistory[0].deals[0].status).toBe('fulfilled');
+   await write('ready');for(let n=0;n<100;n++){s=(await req()).data;if(s.phase==='actions')break;await pause(10);}
+   await write('action',{actionId:'U3'});
+   for(let n=0;n<200;n++){s=(await req()).data;if(s.phase==='report')break;await pause(10);}expect(s.phase).toBe('report');expect(s.reportHistory[0].actions.NL).toBe('N3');expect(s.reportHistory[0].sources.NL).toBe('fallback');expect(s.reportHistory[0].deals[0].status).toBe('fulfilled');
    for(const k of ['T','A','E','S','P']){const r=s.reportHistory[0];const effects=r.effects.reduce((n:number,e:any)=>n+(e.delta[k]||0),0);expect(Number((r.roundStart[k]+effects+r.adjustment[k]).toFixed(2))).toBe(r.state[k]);}
   }finally{server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));}
  });
