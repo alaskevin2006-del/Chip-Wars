@@ -1,8 +1,17 @@
 import {describe,it,expect} from 'vitest';
 // @ts-expect-error Server-only JavaScript module.
-import {validateEnvelope,buildGameMessages} from '../server/v1/ai.mjs';
+import {validateEnvelope,buildGameMessages,normalizeEndingNarrative} from '../server/v1/ai.mjs';
 const obs={task:'polish',role:{id:'US',name:'美国政府'},round:1,ownPreference:{id:'US_SEC',label:'安全优先',blurb:'把封锁的真实强度放在第一位。',weights:{Teff:.5,A:.2,E:.1,LowP:.2}},originalText:'合作',legalActions:[{id:'U3'}]};
 describe('V1 AI task boundaries',()=>{
+ it('accepts a harmless type discriminator in an ending narrative',()=>{
+  const ending={type:'ending',title:'稳定但脆弱的平衡',paragraphs:['第一段结局。','第二段结局。','第三段结局。']};
+  expect(validateEnvelope('ending',ending,{}).valid).toBe(true);
+ });
+ it('normalizes wrapped ending output and merges surplus paragraphs',()=>{
+  const wrapped={type:'ending',ending:{title:'稳定但脆弱的平衡',paragraphs:['第一段。','第二段。','第三段。','第四段。','第五段。']}};
+  expect(validateEnvelope('ending',wrapped,{}).valid).toBe(true);
+  expect(normalizeEndingNarrative(wrapped)).toEqual({title:'稳定但脆弱的平衡',paragraphs:['第一段。','第二段。','第三段。','第四段。第五段。']});
+ });
  it('refuses newly added action promises, quantities, threats and conditions in polish',()=>{
   for(const candidate of ['我保证选择U3','合作，否则制裁','如果合作就保证交付','合作100台','合作三台设备','若先放宽才合作'])expect(validateEnvelope('polish',{candidate},obs).valid).toBe(false);
   expect(validateEnvelope('polish',{candidate:'希望讨论合作。'},obs).valid).toBe(true);
@@ -25,7 +34,7 @@ describe('V1 AI task boundaries',()=>{
  });
  it('prompts each task from supplied role projection and only permits legal action IDs',()=>{
   expect(validateEnvelope('action',{actionId:'C1'},obs).valid).toBe(false);expect(validateEnvelope('action',{actionId:'U3'},obs).valid).toBe(true);
-  const messages=buildGameMessages({...obs,task:'action'});expect(messages[0].content).toContain('不能知道尚未行动角色本轮会选什么');expect(messages[0].content).toContain('不得声称知道对方隐藏偏好');expect(JSON.stringify(messages)).toContain('US_SEC');
+  const messages=buildGameMessages({...obs,task:'action'});expect(messages[0].content).toContain('不能知道尚未行动角色本轮会选什么');expect(messages[0].content).toContain('不得声称知道对方隐藏目标');expect(JSON.stringify(messages)).toContain('US_SEC');
  });
  it('tailors secretary guidance to the current phase and falls back to negotiation',()=>{
   const secretary=(phase?:string)=>buildGameMessages({...obs,task:'secretary',...(phase?{phase}:{})})[0].content;

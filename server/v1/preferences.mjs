@@ -43,8 +43,8 @@ export const TERM_IDS = freeze(Object.keys(TERM_LABELS));
 // Weights sum to 1 within a type, so every score is comparable across types and across roles.
 const preference = (role, id, label, blurb, weights) => {
   const sum = Object.values(weights).reduce((n, v) => n + v, 0);
-  if (Object.keys(weights).some(k => !TERM_IDS.includes(k))) throw new Error(`偏好权重项无效：${id}`);
-  if (Math.abs(sum - 1) > 1e-9) throw new Error(`偏好权重须归一：${id}`);
+  if (Object.keys(weights).some(k => !TERM_IDS.includes(k))) throw new Error(`目标权重项无效：${id}`);
+  if (Math.abs(sum - 1) > 1e-9) throw new Error(`目标权重须归一：${id}`);
   return { role, id, label, blurb, weights: freeze({ ...weights }),
     description: `${TERM_IDS.filter(k => weights[k]).map(k => `${TERM_LABELS[k]}${Math.round(weights[k] * 100)}%`).join('、')}。` };
 };
@@ -104,7 +104,7 @@ export const deltaThresholdFor = prefId => {
 
 export function score(prefId, state) {
   const pref = preferenceById(prefId);
-  if (!pref) throw new Error(`偏好类型无效：${prefId}`);
+  if (!pref) throw new Error(`目标类型无效：${prefId}`);
   const terms = normalize(state);
   let total = 0;
   for (const [key, weight] of Object.entries(pref.weights)) total += weight * terms[key];

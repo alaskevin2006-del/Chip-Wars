@@ -9,7 +9,7 @@ import {createProvider} from './diplomacy/provider.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ERRORS = {not_configured:'未配置模型密钥，无法进行真实推演。请联系维护者配置服务端模型。', invalid_configuration:'模型服务配置无效。', daily_limit:'今日模型调用额度已用完。', quota_unavailable:'模型额度记录不可用。', provider_busy:'模型服务繁忙，本次跳过。', upstream_rate_limit:'模型服务限流，本次跳过。', upstream_unavailable:'模型服务不可用，本次跳过。', timeout:'模型响应超时，本次跳过。', invalid_model_action:'模型回复两次未通过格式或权限校验，本次跳过。', response_limit:'模型响应过大，本次跳过。', empty_response:'模型返回空结果，本次跳过。'};
-const MIME = {'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.ico':'image/x-icon','.json':'application/json; charset=utf-8'};
+const MIME = {'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.woff2':'font/woff2','.ico':'image/x-icon','.json':'application/json; charset=utf-8'};
 function json(res, status, value) {res.writeHead(status, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}); res.end(JSON.stringify(value));}
 async function body(req) {
   if (!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] || '')) throw Object.assign(new Error('需要 JSON 请求'),{status:415});

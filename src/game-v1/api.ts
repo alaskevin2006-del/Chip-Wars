@@ -1,4 +1,4 @@
-import type { Commitments, NewsItem, Role, RoundBrief, SecretaryAdvice, Session, Snapshot, ActionId, Statement } from './types';
+import type { Commitments, EndingNarrative, NewsItem, Role, RoundBrief, SecretaryAdvice, Session, Snapshot, ActionId, Statement } from './types';
 
 export class ApiError extends Error {
   constructor(message: string, public status: number) { super(message); }
@@ -26,6 +26,7 @@ export const api = {
   draftStatement: (auth: Auth, text: string) => request<{statement:Statement;reason:string;drafted:boolean;source:'llm'}>(path(auth,'/statement'),'POST',{text},auth),
   newscast: (auth: Auth, expectedVersion: number) => request<{items:NewsItem[]}>(path(auth,'/newscast'),'POST',{expectedVersion},auth),
   brief: (auth: Auth, expectedVersion: number) => request<{brief:RoundBrief|null}>(path(auth,'/brief'),'POST',{expectedVersion},auth),
+  ending: (auth: Auth, expectedVersion: number) => request<{ending:EndingNarrative}>(path(auth,'/ending'),'POST',{expectedVersion},auth),
   polish: (auth: Auth, text: string, tone: 'neutral'|'firm'|'friendly' = 'neutral') => request<{candidate:string;source:'llm'|'original'}>(path(auth,'/polish'),'POST',{text,tone},auth),
   secretary: (auth: Auth) => request<{advice:SecretaryAdvice}>(path(auth,'/secretary'),'POST',{},auth),
 };

@@ -6,10 +6,10 @@ import {tmpdir} from 'node:os';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {randomBytes,randomInt,timingSafeEqual} from 'node:crypto';
 import * as game from './v1/engine.mjs';
-import {createGameProvider,validateEnvelope,buildDecisionBrief} from './v1/ai.mjs';
+import {createGameProvider,validateEnvelope,buildDecisionBrief,normalizeEndingNarrative} from './v1/ai.mjs';
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const ROLES=['US','CN','NL','AS'];
-const MIME={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.ico':'image/x-icon','.json':'application/json; charset=utf-8'};
+const MIME={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.woff2':'font/woff2','.ico':'image/x-icon','.json':'application/json; charset=utf-8'};
 function json(res,status,value){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(value));}
 const error=(message,status=422)=>Object.assign(new Error(message),{status});
 async function body(req){
@@ -19,6 +19,19 @@ async function body(req){
 }
 function fields(value,allowed){if(Object.keys(value).some(key=>!allowed.includes(key)))throw error('请求含不支持的字段。',400);}
 const same=(a,b)=>a&&b&&Buffer.byteLength(a)===Buffer.byteLength(b)&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
+const PLAYER_NAMES={US:'美国政府',CN:'中国政府',NL:'荷兰政府',AS:'ASML'};
+function endingFallback(snapshot){
+ const state=snapshot.state,results=snapshot.results||{},roles=['US','CN','NL','AS'];
+ const winners=roles.filter(role=>results[role]?.diplomaticVictory).map(role=>PLAYER_NAMES[role]);
+ const substantive=roles.filter(role=>results[role]?.substantiveVictory&&!results[role]?.diplomaticVictory).map(role=>PLAYER_NAMES[role]);
+ const blocked=roles.filter(role=>results[role]?.delta>=results[role]?.deltaThreshold&&results[role]?.credit<1).map(role=>PLAYER_NAMES[role]);
+ const title=state.T>=4?'高壁垒、高协调，但商业空间收缩':state.A>=3.5?'协调上升，产业代价显现':'管制与商业仍未形成稳定平衡';
+ return {title,source:'template',paragraphs:[
+  `四轮结束时，先进技术获取难度${state.T>=4?'处于高位':state.T<=2?'有所回落':'保持在中间区间'}，美荷政策协调度${state.A>=4?'接近锁定':state.A<=2?'明显减弱':'保持在有限合作区间'}，整体商业收益${state.E<=2.5?'被压到低位':state.E>=4?'得到明显修复':'仍然承压'}。`,
+  `${winners.length?`${winners.join('、')}取得外交胜利`:'没有角色取得外交胜利'}；${substantive.length?`${substantive.join('、')}达成实质胜利但缺少全员履约安排`:'没有角色停留在仅实质胜利的状态'}；${blocked.length?`${blocked.join('、')}虽达到数值门槛，却因信用不足失去胜利资格`:'没有角色因信用不足被挡在胜利线之外'}。`,
+  '这一结局由管制能力、盟友协调、商业损失与履约信用共同形成。所有指标和叙事均为虚构游戏内容，不构成现实政策预测。',
+ ]};
+}
 export function createDiplomacyServer(options={}){
  const env=options.env??process.env,provider=options.provider??createGameProvider({env,fetchImpl:options.fetchImpl});
  // The browser caches the old bundle, so expose the build time that the served bundle was produced
@@ -181,7 +194,7 @@ export function createDiplomacyServer(options={}){
      const s={id:randomBytes(16).toString('hex'),token:randomBytes(32).toString('hex'),state:game.createGame(typeof draw==='function'?draw():draw,typeof seed==='function'?seed():seed),playerRole:input.playerRole,created:Date.now(),touched:Date.now(),notices:[],epoch:0,busy:false,timer:null,controller:null,assists:new Set(),cancelled:false,phaseKey:null};
      sessions.set(s.id,s);persist(s);json(res,201,{id:s.id,token:s.token,snapshot:snapshot(s)});setTimeout(()=>void kick(s),0).unref?.();return;
     }
-    const match=pathname.match(/^\/api\/diplomacy\/sessions\/([a-f0-9]{32})(?:\/(message|proposal|respond|ready|action|next|polish|secretary|declare|statement|newscast|brief))?$/);
+    const match=pathname.match(/^\/api\/diplomacy\/sessions\/([a-f0-9]{32})(?:\/(message|proposal|respond|ready|action|next|polish|secretary|declare|statement|newscast|brief|ending))?$/);
     if(!match)throw error('接口不存在。',404);
     const s=sessions.get(match[1])||restore(match[1]);
     const token=(req.headers['x-session-token']||req.headers.authorization||'').replace(/^Bearer /,'').trim()||url.searchParams.get('token')||'';
@@ -220,7 +233,7 @@ export function createDiplomacyServer(options={}){
      // reason is advice for the player, never part of the recorded statement the engine stores.
      json(res,200,{statement:{issue:output.issue,tone:output.tone,level:output.level,target:output.target??null,text:output.text},reason:output.reason||'',drafted:!original,source:'llm'});return;
     }
-    const allowed={declare:['issue','tone','level','target','text'],newscast:[],brief:[],message:['content','target'],proposal:['commitments','text'],respond:['dealId','accept'],ready:[],action:['actionId'],next:[]};fields(input,['expectedVersion',...allowed[route]]);
+    const allowed={declare:['issue','tone','level','target','text'],newscast:[],brief:[],ending:[],message:['content','target'],proposal:['commitments','text'],respond:['dealId','accept'],ready:[],action:['actionId'],next:[]};fields(input,['expectedVersion',...allowed[route]]);
     if(!Number.isInteger(input.expectedVersion)||input.expectedVersion!==s.state.version)throw error('状态已更新，请同步后重试；草稿可保留。',409);
     if(route==='brief'){
      const brief=game.reportBrief(s.state,s.playerRole);
@@ -245,6 +258,18 @@ export function createDiplomacyServer(options={}){
      const byId=Object.fromEntries(game.renderNewsFallback(s.state).map(item=>[item.id,item]));
      if(output)for(const item of output.items)if(byId[item.id]&&!/[0-9]/.test(item.headline+item.body))byId[item.id]={...byId[item.id],headline:item.headline,body:item.body,source:'llm'};
      json(res,200,{items:subjects.map(subject=>byId[subject.id])});return;
+    }
+    if(route==='ending'){
+     if(s.state.phase!=='finished')throw error('对局尚未结束，不能生成赛后结局。');
+     const projected=game.getSnapshot(s.state,s.playerRole);
+     const observation={...taskObservation(s,s.playerRole,'ending'),finalState:projected.state,finalResults:projected.results,revealedPreferences:projected.revealedPreferences,finalReportHistory:projected.reportHistory};
+     let output=null;
+     if(provider.status().enabled){
+      const controller=new AbortController();s.assists.add(controller);
+      try{const candidate=await provider.decide(observation,value=>validateEnvelope('ending',value,observation),controller.signal);if(validateEnvelope('ending',candidate,observation).valid)output=candidate;}catch{}finally{s.assists.delete(controller);}
+     }
+     const narrative=output?normalizeEndingNarrative(output):null;
+     json(res,200,{ending:narrative?{...narrative,source:'llm'}:endingFallback(projected)});return;
     }
     try{
      if(route==='declare')s.state=game.declare(s.state,s.playerRole,input.issue?{issue:input.issue,tone:input.tone,level:input.level,target:input.target??null,text:input.text}:null,'player');

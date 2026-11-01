@@ -76,7 +76,7 @@ const introPages = [
             <p><strong>荷兰：</strong>掌握光刻设备出口审批主权，却持续承受美国同盟压力与本国产业商业诉求的双重拉扯</p>
             <p><strong>ASML：</strong>手握不可替代的光刻技术垄断优势，却同时受制于美国域外管辖与荷兰本国出口许可</p>
           </div>
-          <p className="g-intro-transition">接下来，你将扮演其中一方，在四回合的谈判与秘密行动中，完成一个<strong>只有你自己知道的偏好</strong>。</p>
+          <p className="g-intro-transition">接下来，你将扮演其中一方，在四回合的谈判与秘密行动中，完成一个<strong>只有你自己知道的个人目标</strong>。</p>
         </div>
       </div>
     ),

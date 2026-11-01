@@ -18,6 +18,8 @@ describe('V1.6 private autonomous HTTP integration',()=>{
   expect(s.phase).toBe('finished');expect(s.reportHistory).toHaveLength(4);expect(s.notices.some((n:any)=>n.message.includes('确定性策略兜底'))).toBe(true);
   for(const r of s.reportHistory){expect(r.sources.CN).toBe('fallback');expect(r.sources.NL).toBe('fallback');expect(r.sources.US).toBe('timeout');expect(r.actions.CN).not.toBe('PASS');expect(r.actions.NL).not.toBe('PASS');expect(['hidden','S4']).toContain(r.actions.AS);}
   expect(s.goals).toBeUndefined();expect(s.seed).toBeUndefined();expect(s.randomRecords).toBeUndefined();expect(Object.values(s.results).every((r:any)=>typeof r.substantiveVictory==='boolean'&&typeof r.diplomaticVictory==='boolean')).toBe(true);
+  const ending=await request(`/api/diplomacy/sessions/${data.id}/ending`,'POST',{expectedVersion:s.version},data.token);
+  expect(ending.status).toBe(200);expect(ending.data.ending.source).toBe('template');expect(ending.data.ending.paragraphs).toHaveLength(3);expect(JSON.stringify(ending.data.ending)).not.toContain('S1');
  });
  it('keeps private terms and AS actions out of every outsider snapshot, report and secretary input',async()=>{
   const seen:any[]=[];
